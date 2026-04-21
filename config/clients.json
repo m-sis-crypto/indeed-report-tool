@@ -16,5 +16,11 @@
     "spreadsheet_id": "1IhfnyHU28fijZGGiJLQsSGIt94wkEAp42APRLJ2Vw-I",
     "sheet_pattern1": "2026年3月～3月",
     "sheet_pattern2": "2026年3月～3月（詳細）"
+  },
+  "Kグループ": {
+    "master_path": "masters/kグループ.csv",
+    "spreadsheet_id": "1MgJgRi53M_JijGZW0UGo2kp3kzBa03y2L7e6AKLF1S0",
+    "sheet_pattern1": "めぐテスト",
+    "sheet_pattern2": "めぐテスト（詳細）"
   }
 }
