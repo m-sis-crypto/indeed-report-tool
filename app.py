@@ -160,11 +160,13 @@ def get_rules():
 # Sheets ヘルパー
 # ============================================================
 def get_service():
-    if "gcp_credentials_json" in st.secrets:
-        import json
-        creds = Credentials.from_authorized_user_info(
-            json.loads(st.secrets["gcp_credentials_json"]), SCOPES
-        )
+    if "gcp_refresh_token" in st.secrets:
+        creds = Credentials.from_authorized_user_info({
+            "refresh_token": st.secrets["gcp_refresh_token"],
+            "token_uri":     st.secrets["gcp_token_uri"],
+            "client_id":     st.secrets["gcp_client_id"],
+            "client_secret": st.secrets["gcp_client_secret"],
+        }, SCOPES)
     else:
         creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
     if creds.expired and creds.refresh_token:
