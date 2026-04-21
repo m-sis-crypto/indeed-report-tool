@@ -1,0 +1,20 @@
+{
+  "ALLSTARTED": {
+    "master_path": "masters/allstarted.csv",
+    "spreadsheet_id": "1bxHZxhPFzgoz-xXSk8b7Onk5G-N6KcwehAZMiqiJqM4",
+    "sheet_pattern1": "レポート抽出",
+    "sheet_pattern2": "レポート抽出_詳細"
+  },
+  "TOU": {
+    "master_path": "masters/tou.csv",
+    "spreadsheet_id": "1zfQZ_Puyus9nJLGE3iNpSoJmlqUMdhS8uCS79EHCJe4",
+    "sheet_pattern1": "レポート抽出",
+    "sheet_pattern2": "レポート抽出_詳細"
+  },
+  "KAI": {
+    "master_path": "masters/kai.csv",
+    "spreadsheet_id": "1IhfnyHU28fijZGGiJLQsSGIt94wkEAp42APRLJ2Vw-I",
+    "sheet_pattern1": "2026年3月～3月",
+    "sheet_pattern2": "2026年3月～3月（詳細）"
+  }
+}
