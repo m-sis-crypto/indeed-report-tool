@@ -160,9 +160,10 @@ def get_rules():
 # Sheets ヘルパー
 # ============================================================
 def get_service():
-    if "gcp_credentials" in st.secrets:
+    if "gcp_credentials_json" in st.secrets:
+        import json
         creds = Credentials.from_authorized_user_info(
-            dict(st.secrets["gcp_credentials"]), SCOPES
+            json.loads(st.secrets["gcp_credentials_json"]), SCOPES
         )
     else:
         creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
