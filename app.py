@@ -160,7 +160,12 @@ def get_rules():
 # Sheets ヘルパー
 # ============================================================
 def get_service():
-    creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+    if "gcp_credentials" in st.secrets:
+        creds = Credentials.from_authorized_user_info(
+            dict(st.secrets["gcp_credentials"]), SCOPES
+        )
+    else:
+        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
     return build("sheets", "v4", credentials=creds)
