@@ -52,6 +52,8 @@ def load_store_master(master_path):
                 'store':      row['store_name'],
                 'short_name': row['short_name'],
                 'keywords':   keywords,
+                'category':   row.get('category', ''),
+                'genre':      row.get('genre', ''),
             })
     return master
 

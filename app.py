@@ -7,6 +7,7 @@ Indeed レポート Streamlit UI
 import csv
 import io
 import json
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -41,6 +42,17 @@ MASTERS_DIR.mkdir(exist_ok=True)
 TOKEN_PATH = Path(r"C:\Users\mgm03\OneDrive\デスクトップ\AIエージェント\tabelog_tool\レビュワー取得\token.json")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 COLS = ["店舗", "職種", "雇用形態", "掲載開始", "掲載終了", "表示回数", "クリック数", "応募開始数", "応募数", "費用", "参照番号"]
+
+# ============================================================
+# データ倉庫設定
+# ============================================================
+WAREHOUSE_SPREADSHEET_ID = "1Vr7-IpCgEG4Gl2kRhb86Gxz4vYg8R9VpkTEpLNzvuF4"
+WAREHOUSE_SHEET_NAME     = "データ倉庫"
+WAREHOUSE_COLS = [
+    "取込日", "クライアント", "店舗", "大カテゴリ", "業態",
+    "職種", "雇用形態", "集計開始", "集計終了",
+    "表示回数", "クリック数", "応募開始数", "応募数", "費用",
+]
 
 # ============================================================
 # 設定ファイルの読み書き
@@ -124,16 +136,19 @@ def save_rules_df(df: pd.DataFrame):
 
 def load_master_df(master_path: str) -> pd.DataFrame:
     p = BASE_DIR / master_path
+    empty = pd.DataFrame(columns=["Indeed企業名", "正規化名", "大カテゴリ", "業態", "キーワード（カンマ区切り）"])
     if not p.exists():
-        return pd.DataFrame(columns=["Indeed企業名", "正規化名", "キーワード（カンマ区切り）"])
+        return empty
     with open(p, encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     if not rows:
-        return pd.DataFrame(columns=["Indeed企業名", "正規化名", "キーワード（カンマ区切り）"])
+        return empty
     return pd.DataFrame([
         {
             "Indeed企業名":          r["store_name"],
             "正規化名":              r["short_name"],
+            "大カテゴリ":            r.get("category", ""),
+            "業態":                  r.get("genre", ""),
             "キーワード（カンマ区切り）": r["keywords"],
         }
         for r in rows
@@ -144,15 +159,18 @@ def save_master_df(df: pd.DataFrame, master_path: str):
     p = BASE_DIR / master_path
     p.parent.mkdir(exist_ok=True)
     out = df.rename(columns={
-        "Indeed企業名": "store_name",
-        "正規化名":     "short_name",
+        "Indeed企業名":          "store_name",
+        "正規化名":              "short_name",
+        "大カテゴリ":            "category",
+        "業態":                  "genre",
         "キーワード（カンマ区切り）": "keywords",
     })
-    out.to_csv(p, index=False, encoding="utf-8-sig")
+    # 列順を固定
+    cols = [c for c in ["store_name", "short_name", "category", "genre", "keywords"] if c in out.columns]
+    out[cols].to_csv(p, index=False, encoding="utf-8-sig")
 
 
 def get_rules():
-    """集計用ルールをファイルから読み込む（なければモジュールのデフォルト）"""
     return load_job_role_rules(str(RULES_PATH)) if RULES_PATH.exists() else None
 
 
@@ -227,6 +245,64 @@ def append_to_sheet(service, spreadsheet_id, sheet_name, rows, next_row):
 
 
 # ============================================================
+# データ倉庫ヘルパー
+# ============================================================
+def ensure_warehouse_sheet(service):
+    """「データ倉庫」シートがなければ作成し、ヘッダーも追加する"""
+    spreadsheet = service.spreadsheets().get(spreadsheetId=WAREHOUSE_SPREADSHEET_ID).execute()
+    exists = any(s["properties"]["title"] == WAREHOUSE_SHEET_NAME for s in spreadsheet["sheets"])
+    if not exists:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+            body={"requests": [{"addSheet": {"properties": {"title": WAREHOUSE_SHEET_NAME}}}]},
+        ).execute()
+
+    # ヘッダー行がなければ追加
+    result = service.spreadsheets().values().get(
+        spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+        range=f"'{WAREHOUSE_SHEET_NAME}'!A1:A1"
+    ).execute()
+    if not result.get("values"):
+        service.spreadsheets().values().update(
+            spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+            range=f"'{WAREHOUSE_SHEET_NAME}'!A1",
+            valueInputOption="RAW",
+            body={"values": [WAREHOUSE_COLS]},
+        ).execute()
+
+
+def build_warehouse_rows(client_name, data2, master, period_start, period_end):
+    """データ倉庫用の行を生成（詳細データ: 店舗×雇用形態×職種）"""
+    today = date.today().strftime("%Y/%m/%d")
+    store_labels = {e["short_name"]: (e.get("category", ""), e.get("genre", "")) for e in master}
+
+    rows = []
+    for (short_name, emp_type, job_title) in sorted(data2.keys()):
+        d = data2[(short_name, emp_type, job_title)]
+        cat, genre = store_labels.get(short_name, ("", ""))
+        rows.append([
+            today, client_name, short_name, cat, genre,
+            job_title, emp_type, period_start, period_end,
+            d["表示回数"], d["クリック数"], d["応募開始数"], d["応募数"],
+            round(d["費用"]),
+        ])
+    return rows
+
+
+def append_to_warehouse(service, warehouse_rows):
+    ensure_warehouse_sheet(service)
+    last = get_last_row(service, WAREHOUSE_SPREADSHEET_ID, WAREHOUSE_SHEET_NAME)
+    next_row = last + 1
+    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:N{next_row + len(warehouse_rows) - 1}"
+    service.spreadsheets().values().update(
+        spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+        range=range_str,
+        valueInputOption="RAW",
+        body={"values": warehouse_rows},
+    ).execute()
+
+
+# ============================================================
 # UI
 # ============================================================
 st.set_page_config(page_title="Indeed レポートツール", layout="wide")
@@ -290,7 +366,6 @@ with settings_tab:
         st.divider()
         st.subheader("CSVからインポート")
 
-        # テンプレートダウンロード
         rules_template = io.StringIO()
         pd.DataFrame(columns=["正規化後の職種名", "キーワード（カンマ区切り）"]).to_csv(rules_template, index=False)
         st.download_button(
@@ -304,7 +379,6 @@ with settings_tab:
         rules_import = st.file_uploader("職種ルールCSVをアップロード", type=["csv"], key="import_rules")
         if rules_import:
             df_ri = pd.read_csv(rules_import, encoding="utf-8-sig")
-            # 列名を正規化
             col_map = {}
             for c in df_ri.columns:
                 if "canonical" in c or "正規化" in c:
@@ -347,10 +421,15 @@ with settings_tab:
                 column_config={
                     "Indeed企業名":          st.column_config.TextColumn("Indeed企業名（CSVの表記通りに入力）", width="large"),
                     "正規化名":              st.column_config.TextColumn("正規化名（レポートに表示する名前）", width="medium"),
+                    "大カテゴリ":            st.column_config.SelectboxColumn(
+                        "大カテゴリ", width="small",
+                        options=["飲食", "美容", "小売", "医療・介護", "その他"],
+                    ),
+                    "業態":                  st.column_config.TextColumn("業態（例：居酒屋・焼肉・ネイル）", width="medium"),
                     "キーワード（カンマ区切り）": st.column_config.TextColumn("マッチキーワード（カンマ区切り）", width="large"),
                 },
             )
-            st.caption("💡 キーワードが**すべて**含まれていれば一致します。1語だけでもOKです。")
+            st.caption("💡 大カテゴリ・業態はデータ倉庫の分析に使われます。キーワードが**すべて**含まれていれば一致します。")
 
             if st.button("💾 マスターを保存", key="save_master"):
                 save_master_df(edited_master_df, m_path)
@@ -368,9 +447,8 @@ with settings_tab:
             )
 
             if import_mode == "マスターCSVをそのままインポート":
-                # テンプレートダウンロード
                 master_template = io.StringIO()
-                pd.DataFrame(columns=["store_name", "short_name", "keywords"]).to_csv(master_template, index=False)
+                pd.DataFrame(columns=["store_name", "short_name", "category", "genre", "keywords"]).to_csv(master_template, index=False)
                 st.download_button(
                     "📥 テンプレートCSVをダウンロード",
                     master_template.getvalue().encode("utf-8-sig"),
@@ -378,21 +456,28 @@ with settings_tab:
                     mime="text/csv",
                     key="dl_master_template",
                 )
-                st.caption("store_name=Indeed企業名、short_name=正規化名、keywords=キーワード（カンマ区切り）")
+                st.caption("store_name=Indeed企業名、short_name=正規化名、category=大カテゴリ、genre=業態、keywords=キーワード（カンマ区切り）")
 
                 master_import = st.file_uploader("マスターCSVをアップロード", type=["csv"], key="import_master_csv")
                 if master_import:
                     df_mi = pd.read_csv(master_import, encoding="utf-8-sig")
-                    # 列名を正規化（英語列名・日本語列名どちらも受け付ける）
                     col_map = {}
                     for c in df_mi.columns:
                         if c in ("store_name", "Indeed企業名"):
                             col_map[c] = "Indeed企業名"
                         elif c in ("short_name", "正規化名"):
                             col_map[c] = "正規化名"
+                        elif c in ("category", "大カテゴリ"):
+                            col_map[c] = "大カテゴリ"
+                        elif c in ("genre", "業態"):
+                            col_map[c] = "業態"
                         elif c in ("keywords", "キーワード（カンマ区切り）"):
                             col_map[c] = "キーワード（カンマ区切り）"
-                    df_mi = df_mi.rename(columns=col_map)[["Indeed企業名", "正規化名", "キーワード（カンマ区切り）"]]
+                    df_mi = df_mi.rename(columns=col_map)
+                    for col in ["大カテゴリ", "業態"]:
+                        if col not in df_mi.columns:
+                            df_mi[col] = ""
+                    df_mi = df_mi[["Indeed企業名", "正規化名", "大カテゴリ", "業態", "キーワード（カンマ区切り）"]]
                     st.dataframe(df_mi, use_container_width=True, hide_index=True)
                     st.caption(f"{len(df_mi)}行を読み込みました")
                     col_a, col_b = st.columns(2)
@@ -410,7 +495,7 @@ with settings_tab:
                             st.rerun()
 
             else:  # IndeedのCSVから企業名を抽出
-                st.caption("IndeedのCSVをアップロードすると、企業名の一覧が抽出されます。正規化名とキーワードを入力して保存してください。")
+                st.caption("IndeedのCSVをアップロードすると、企業名の一覧が抽出されます。正規化名・大カテゴリ・業態を入力して保存してください。")
                 indeed_import = st.file_uploader("IndeedのCSVをアップロード", type=["csv"], key="import_indeed_csv")
                 if indeed_import:
                     df_indeed = pd.read_csv(indeed_import, encoding="utf-8-sig")
@@ -418,7 +503,6 @@ with settings_tab:
                     if not unique_names:
                         st.error("❌ 「企業名」列が見つかりません。IndeedのCSVか確認してください。")
                     else:
-                        # 既存マスターと照合して未登録のみ抽出
                         existing = load_master_df(m_path)
                         registered = set(existing["Indeed企業名"].tolist())
                         new_names = [n for n in unique_names if n not in registered]
@@ -429,7 +513,9 @@ with settings_tab:
                             df_new = pd.DataFrame({
                                 "Indeed企業名": new_names,
                                 "正規化名": ["" for _ in new_names],
-                                "キーワード（カンマ区切り）": [n for n in new_names],  # デフォルトは企業名をそのままキーワードに
+                                "大カテゴリ": ["" for _ in new_names],
+                                "業態": ["" for _ in new_names],
+                                "キーワード（カンマ区切り）": [n for n in new_names],
                             })
                             edited_new = st.data_editor(
                                 df_new,
@@ -438,6 +524,11 @@ with settings_tab:
                                 column_config={
                                     "Indeed企業名":          st.column_config.TextColumn("Indeed企業名", width="large"),
                                     "正規化名":              st.column_config.TextColumn("正規化名（レポートに表示する名前）", width="medium"),
+                                    "大カテゴリ":            st.column_config.SelectboxColumn(
+                                        "大カテゴリ", width="small",
+                                        options=["飲食", "美容", "小売", "医療・介護", "その他"],
+                                    ),
+                                    "業態":                  st.column_config.TextColumn("業態（例：居酒屋・ネイル）", width="medium"),
                                     "キーワード（カンマ区切り）": st.column_config.TextColumn("キーワード（カンマ区切り）", width="large"),
                                 },
                             )
@@ -593,9 +684,19 @@ with main_tab:
                     label = "①②両シート" if sheet2 else "シート①"
                     st.success(f"✅ 不明行 {len(unknown_rows)}行を{label}に追記しました")
 
+                # ── データ倉庫に追記 ──────────────────────────
+                if data2:
+                    warehouse_rows = build_warehouse_rows(client_name, data2, master, period_start, period_end)
+                    append_to_warehouse(service, warehouse_rows)
+                    st.success(f"✅ データ倉庫に {len(warehouse_rows)}行を追記しました")
+
                 st.link_button(
                     "📄 スプレッドシートを開く",
                     f"https://docs.google.com/spreadsheets/d/{config['spreadsheet_id']}",
+                )
+                st.link_button(
+                    "🗄️ データ倉庫を開く",
+                    f"https://docs.google.com/spreadsheets/d/{WAREHOUSE_SPREADSHEET_ID}",
                 )
 
             except Exception as e:
