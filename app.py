@@ -54,6 +54,20 @@ WAREHOUSE_COLS = [
     "表示回数", "クリック数", "応募開始数", "応募数", "費用",
 ]
 
+# 業態の選択肢（大カテゴリ別）
+GENRE_OPTIONS = [
+    "",
+    # 飲食
+    "イタリアン", "ピッツェリア", "フレンチ", "スペイン料理", "洋食・西洋料理",
+    "和食", "寿司", "そば・うどん", "中華料理", "ラーメン", "アジア・エスニック",
+    "居酒屋・ダイニングバー", "バー", "カフェ・喫茶店", "パン屋・ベーカリー",
+    "ケーキ屋・スイーツ", "ファーストフード・ファミレス", "テイクアウト・惣菜・弁当屋",
+    "焼肉", "焼き鳥", "専門料理　他", "ホテル・旅館",
+    "給食・社員食堂・病院・介護", "食品工場・セントラルキッチン",
+    # 美容（先々追加予定）
+    # 小売（先々追加予定）
+]
+
 # ============================================================
 # 設定ファイルの読み書き
 # ============================================================
@@ -423,9 +437,12 @@ with settings_tab:
                     "正規化名":              st.column_config.TextColumn("正規化名（レポートに表示する名前）", width="medium"),
                     "大カテゴリ":            st.column_config.SelectboxColumn(
                         "大カテゴリ", width="small",
-                        options=["飲食", "美容", "小売", "医療・介護", "その他"],
+                        options=["", "飲食", "美容", "小売", "医療・介護", "その他"],
                     ),
-                    "業態":                  st.column_config.TextColumn("業態（例：居酒屋・焼肉・ネイル）", width="medium"),
+                    "業態":                  st.column_config.SelectboxColumn(
+                        "業態", width="medium",
+                        options=GENRE_OPTIONS,
+                    ),
                     "キーワード（カンマ区切り）": st.column_config.TextColumn("マッチキーワード（カンマ区切り）", width="large"),
                 },
             )
@@ -526,9 +543,12 @@ with settings_tab:
                                     "正規化名":              st.column_config.TextColumn("正規化名（レポートに表示する名前）", width="medium"),
                                     "大カテゴリ":            st.column_config.SelectboxColumn(
                                         "大カテゴリ", width="small",
-                                        options=["飲食", "美容", "小売", "医療・介護", "その他"],
+                                        options=["", "飲食", "美容", "小売", "医療・介護", "その他"],
                                     ),
-                                    "業態":                  st.column_config.TextColumn("業態（例：居酒屋・ネイル）", width="medium"),
+                                    "業態":                  st.column_config.SelectboxColumn(
+                                        "業態", width="medium",
+                                        options=GENRE_OPTIONS,
+                                    ),
                                     "キーワード（カンマ区切り）": st.column_config.TextColumn("キーワード（カンマ区切り）", width="large"),
                                 },
                             )
