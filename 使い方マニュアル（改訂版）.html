@@ -1,0 +1,246 @@
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif; line-height: 1.8; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+h1 { color: #1a73e8; border-bottom: 3px solid #1a73e8; padding-bottom: 8px; }
+h2 { color: #1a73e8; border-left: 5px solid #1a73e8; padding-left: 12px; margin-top: 40px; }
+h3 { color: #333; margin-top: 24px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #ddd; padding: 10px 14px; text-align: left; }
+th { background-color: #e8f0fe; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>Indeed レポート自動整理ツール｜使い方マニュアル</h1>
+
+<table>
+<tr><th>最終更新</th><td>2026年4月21日</td></tr>
+<tr><th>対象者</th><td>社内メンバー全員</td></tr>
+<tr><th>問い合わせ先</th><td>メグ（m-sis@gift-ltd.co.jp）</td></tr>
+</table>
+
+<p><strong>このツールでできること：</strong><br>
+IndeedからダウンロードしたCSVをアップロードするだけで、Googleスプレッドシートに自動転記します。手作業の集計・整形は不要です。</p>
+
+<hr>
+
+<h2>目次</h2>
+<ol>
+<li>ツールへのアクセス</li>
+<li>毎月のレポート出力（4ステップ）</li>
+<li>データの積み上がり方</li>
+<li>新しいクライアントを追加する</li>
+<li>店舗マスターを登録・編集する</li>
+<li>職種ルールについて</li>
+<li>雇用形態の自動判定ルール</li>
+<li>スプレッドシートの列構成</li>
+<li>よくある質問（FAQ）</li>
+</ol>
+
+<hr>
+
+<h2>1. ツールへのアクセス</h2>
+
+<table>
+<tr><th>URL</th><td><a href="https://dffpseianged7bqyzn5mz2.streamlit.app/">https://dffpseianged7bqyzn5mz2.streamlit.app/</a></td></tr>
+<tr><th>インストール</th><td>不要（ブラウザで開くだけ）</td></tr>
+<tr><th>推奨ブラウザ</th><td>Chrome / Edge / Safari / Firefox（最新版）</td></tr>
+<tr><th>PC / スマホ</th><td>PC推奨</td></tr>
+</table>
+
+<p>⚠ <strong>ページが開かないとき：</strong> 無料プランのためスリープ状態になることがあります。URLを開いてそのまま1〜2分待ってください。自動で再起動します。</p>
+
+<hr>
+
+<h2>2. 毎月のレポート出力（4ステップ）</h2>
+
+<p>やることは<strong>4つだけ</strong>です。慣れれば1分で完了します。</p>
+
+<h3>STEP 1｜IndeedからCSVをダウンロード</h3>
+<ol>
+<li>Indeedの管理画面にログイン</li>
+<li>レポート画面からCSVをエクスポート</li>
+<li>ファイル名を確認 → <code>JobsCampaigns_YYYYMMDD_YYYYMMDD.csv</code> になっていればOK</li>
+</ol>
+<p>例：<code>JobsCampaigns_20260301_20260331.csv</code>（2026年3月分）</p>
+
+<p>🚫 <strong>ファイル名は変更しないでください。</strong> ファイル名から集計期間を自動で読み取っています。</p>
+
+<h3>STEP 2｜CSVをアップロード</h3>
+<ol>
+<li>ブラウザでツールを開く</li>
+<li>「📊 レポート」タブが開いていることを確認</li>
+<li>CSVをドラッグ＆ドロップ（またはクリックして選択）</li>
+<li>集計期間が表示されれば読み込み成功</li>
+</ol>
+
+<h3>STEP 3｜クライアントを選んで確認</h3>
+<ol>
+<li>プルダウンからクライアント名を選ぶ</li>
+<li>集計結果が表示されるので、数値をざっと確認</li>
+</ol>
+
+<p>表示される3つのタブ：</p>
+<table>
+<tr><th>タブ</th><th>内容</th><th>書き込み先</th></tr>
+<tr><td>① 店舗 × 雇用形態</td><td>店舗ごとの集計</td><td>シート①</td></tr>
+<tr><td>② 店舗 × 雇用形態 × 職種</td><td>職種別の詳細集計</td><td>シート②（設定されている場合のみ）</td></tr>
+<tr><td>⚠ 雇用形態不明</td><td>自動判定できなかった行</td><td>両シートの末尾に追記</td></tr>
+</table>
+
+<p>⚠ <strong>「マスター未登録の企業」が出た場合：</strong> その企業はまだ店舗マスターに登録されておらず、集計から除外されています。あとで設定画面から登録してください（→ 5章参照）。</p>
+
+<h3>STEP 4｜スプレッドシートに書き込む</h3>
+<ol>
+<li>「🚀 スプレッドシートに書き込む」をクリック</li>
+<li>数秒待つ</li>
+<li>「✅ ○○行を書き込みました」で完了</li>
+<li>「📄 スプレッドシートを開く」で確認できる</li>
+</ol>
+
+<p>✅ <strong>同じ月を2回書き込んでもOK。</strong> 同じ期間のデータは自動で上書きされます。重複しません。</p>
+
+<hr>
+
+<h2>3. データの積み上がり方</h2>
+
+<p>毎月CSVを書き込むと、月ごとに行が追加されていきます。</p>
+
+<table>
+<tr><th>タイミング</th><th>操作</th><th>結果</th></tr>
+<tr><td>4月末</td><td>3月分CSVを書き込む</td><td>3月分が入る</td></tr>
+<tr><td>5月末</td><td>4月分CSVを書き込む</td><td>3月分 + 4月分</td></tr>
+<tr><td>6月末</td><td>5月分CSVを書き込む</td><td>3月分 + 4月分 + 5月分</td></tr>
+</table>
+
+<p>同じ月を再実行した場合 → その月だけ上書き（他の月には影響なし）。</p>
+
+<hr>
+
+<h2>4. 新しいクライアントを追加する</h2>
+
+<p>新しいクライアントのレポートを出力したいときは、以下の手順で登録します。</p>
+
+<table>
+<tr><th>順番</th><th>やること</th><th>どこで</th></tr>
+<tr><td>1</td><td>Googleスプレッドシートに書き込み先のシートを作成する<br>（シート名の例：「レポート抽出」「レポート抽出_詳細」）</td><td>Googleスプレッドシート</td></tr>
+<tr><td>2</td><td>ツールの「⚙ 設定」→「🏢 クライアント管理」を開く</td><td>ツール画面</td></tr>
+<tr><td>3</td><td>「＋」ボタンで行を追加し、以下を入力して保存する<br>・クライアント名<br>・スプレッドシートID<br>・シート名①（集計用）<br>・シート名②（詳細用・不要なら空欄）</td><td>ツール画面</td></tr>
+<tr><td>4</td><td>「⚙ 設定」→「🗂 店舗マスター」で店舗を登録する（→ 次章参照）</td><td>ツール画面</td></tr>
+<tr><td>5</td><td>「📊 レポート」タブに戻って、CSVをアップロードして動作確認</td><td>ツール画面</td></tr>
+</table>
+
+<p>💡 <strong>スプレッドシートIDの見つけ方：</strong><br>
+スプレッドシートのURL内にある長い英数字の部分です。<br>
+<code>https://docs.google.com/spreadsheets/d/<strong>ここがID</strong>/edit</code></p>
+
+<hr>
+
+<h2>5. 店舗マスターを登録・編集する</h2>
+
+<p>Indeedに新しい企業名（店舗名）が出てきたときに登録が必要です。<br>
+登録しないと「マスター未登録」として集計から除外されます。</p>
+
+<h3>おすすめの登録方法：IndeedCSVから抽出</h3>
+<ol>
+<li>「⚙ 設定」→「🗂 店舗マスター」を開く</li>
+<li>プルダウンでクライアントを選択</li>
+<li>「IndeedのCSVから企業名を抽出」を選ぶ</li>
+<li>IndeedのCSVをアップロード</li>
+<li>→ まだ登録されていない企業名だけが自動で表示される</li>
+<li>「正規化名」に、レポートに表示したい名前を入力する</li>
+<li>「💾 マスターに追加」をクリック</li>
+</ol>
+
+<p>💡 <strong>正規化名のコツ：</strong> Indeed上で表記が違う同じ店舗（例：「○○店 正社員」と「○○店 AP」）に同じ正規化名をつけると、1行にまとめて集計されます。</p>
+
+<p>💡 <strong>キーワードについて：</strong> カンマ区切りで複数指定した場合、すべてのキーワードが企業名に含まれているときだけマッチします（AND条件）。通常はデフォルトのままで問題ありません。</p>
+
+<h3>もうひとつの登録方法：CSVインポート</h3>
+<p>「マスターCSVをそのままインポート」を選ぶと、テンプレートCSVをダウンロードして一括登録できます。大量の店舗を一度に登録したいときに便利です。</p>
+
+<hr>
+
+<h2>6. 職種ルールについて</h2>
+
+<p>IndeedのCSVにある職種名を、レポート用の名前に自動変換するルールです。「⚙ 設定」→「📋 職種ルール」で確認・編集できます。</p>
+
+<p>🚫 <strong>順番が重要です。</strong> 上にあるルールが優先されます。<br>
+例：「調理補助」は「調理」より上に配置する必要があります。逆にすると「調理補助」が「調理」に変換されてしまいます。</p>
+
+<p>現在のルール：</p>
+<table>
+<tr><th>正規化後の職種名</th><th>マッチキーワード</th></tr>
+<tr><td>調理補助</td><td>調理補助、キッチン補助</td></tr>
+<tr><td>調理</td><td>調理、キッチン</td></tr>
+<tr><td>ホール</td><td>ホール</td></tr>
+<tr><td>店舗</td><td>店舗</td></tr>
+<tr><td>深夜アルバイト</td><td>深夜アルバイト</td></tr>
+<tr><td>アルバイト</td><td>アルバイト</td></tr>
+</table>
+
+<p>ルールの追加・変更も設定画面から直接行えます。CSVインポートにも対応しています。</p>
+
+<hr>
+
+<h2>7. 雇用形態の自動判定ルール</h2>
+
+<p>CSVの「求人名」と「キャンペーン名」から、以下の順番で雇用形態を判定しています。</p>
+
+<table>
+<tr><th>優先度</th><th>判定条件</th><th>結果</th></tr>
+<tr><td>1</td><td>求人名に「(正社員)」「（正社員）」が含まれる</td><td>正社員</td></tr>
+<tr><td>2</td><td>求人名に「(アルバイト)」「アルバイト」が含まれる</td><td>AP</td></tr>
+<tr><td>3</td><td>キャンペーン名に「正社員」「社員」が含まれる</td><td>正社員</td></tr>
+<tr><td>4</td><td>キャンペーン名に「AP」「アルバイト」が含まれる</td><td>AP</td></tr>
+<tr><td>5</td><td>いずれにも該当しない</td><td>不明（参照番号付きで出力）</td></tr>
+</table>
+
+<p>💡 「不明」が多い場合は、Indeedの求人名やキャンペーン名に雇用形態の情報が入っていない可能性があります。不明行はシートに追記されるので、手動で確認してください。</p>
+
+<hr>
+
+<h2>8. スプレッドシートの列構成</h2>
+
+<table>
+<tr><th>列</th><th>内容</th><th>補足</th></tr>
+<tr><td>A</td><td>店舗</td><td>正規化後の店舗名</td></tr>
+<tr><td>B</td><td>職種</td><td>シート②のみ。シート①は空欄</td></tr>
+<tr><td>C</td><td>雇用形態</td><td>正社員 / AP / 不明</td></tr>
+<tr><td>D</td><td>掲載開始</td><td>YYYY/MM/DD</td></tr>
+<tr><td>E</td><td>掲載終了</td><td>YYYY/MM/DD</td></tr>
+<tr><td>F</td><td>表示回数</td><td></td></tr>
+<tr><td>G</td><td>クリック数</td><td></td></tr>
+<tr><td>H</td><td>応募開始数</td><td></td></tr>
+<tr><td>I</td><td>応募数</td><td></td></tr>
+<tr><td>J</td><td>費用</td><td>円</td></tr>
+<tr><td>K</td><td>参照番号</td><td>雇用形態不明行のみ</td></tr>
+</table>
+
+<hr>
+
+<h2>9. よくある質問（FAQ）</h2>
+
+<table>
+<tr><th>質問</th><th>回答</th></tr>
+<tr><td><strong>同じ月のCSVを2回書き込んだ</strong></td><td>問題なし。同じ期間は自動で上書きされます。</td></tr>
+<tr><td><strong>複数月分のCSVをまとめて処理したい</strong></td><td>1ファイルずつ順番に実行してください。1回1ファイルのみ対応です。</td></tr>
+<tr><td><strong>店舗名の表記がIndeedで変わった</strong></td><td>設定 → 店舗マスター でキーワード列を修正して保存。</td></tr>
+<tr><td><strong>書き込み先のシート名を変えたい</strong></td><td>設定 → クライアント管理 でシート名を変更。スプレッドシート側にも同名のシートを作成しておく。</td></tr>
+<tr><td><strong>データをやり直したい</strong></td><td>スプレッドシートで対象行を手動削除 → 再度CSVを書き込み。</td></tr>
+<tr><td><strong>ページが開かない</strong></td><td>スリープ状態の可能性あり。1〜2分待つと再起動します。</td></tr>
+<tr><td><strong>「マスター未登録の企業」が毎回出る</strong></td><td>設定 → 店舗マスター から登録すれば次回から出なくなります。</td></tr>
+<tr><td><strong>エラーが出て書き込めない</strong></td><td>CSVのファイル名が正しい形式か／スプレッドシートIDが合っているか／書き込み先シートが存在するか、を確認。解決しない場合はメグに連絡。</td></tr>
+<tr><td><strong>スプレッドシートIDがわからない</strong></td><td>URLの <code>/d/○○○/edit</code> の「○○○」部分がIDです。</td></tr>
+</table>
+
+<hr>
+
+<p><strong>困ったときの連絡先：</strong> メグ（m-sis@gift-ltd.co.jp）</p>
+
+<p><em>最終更新：2026年4月21日</em></p>
+
+</body>
+</html>
