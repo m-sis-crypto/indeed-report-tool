@@ -338,27 +338,33 @@ def _write_master_local(df: pd.DataFrame, master_path: str):
 
 
 def load_master_df(master_path: str, client_name: str = None) -> pd.DataFrame:
-    """店舗マスターを読む。Sheets → ローカルCSV の順。"""
+    """店舗マスターを読む。セッションキャッシュ → Sheets → ローカルCSV の順。"""
+    cache_key = f"_master_cache_{client_name}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
     empty = pd.DataFrame(columns=_MASTER_COLS_JP)
 
     service = get_or_init_service()
     if client_name and service:
         sheets_df = load_master_from_sheets(service, client_name)
         if not sheets_df.empty:
-            # ローカルにも書き出してindeed_report.py互換を保つ
             try:
                 _write_master_local(sheets_df, master_path)
             except Exception:
                 pass
+            st.session_state[cache_key] = sheets_df
             return sheets_df
 
     # ローカルCSVにフォールバック
     p = BASE_DIR / master_path
     if not p.exists():
+        st.session_state[cache_key] = empty
         return empty
     with open(p, encoding="utf-8-sig") as f:
         rows_raw = list(csv.DictReader(f))
     if not rows_raw:
+        st.session_state[cache_key] = empty
         return empty
     df = pd.DataFrame([
         {
@@ -372,6 +378,7 @@ def load_master_df(master_path: str, client_name: str = None) -> pd.DataFrame:
         }
         for r in rows_raw
     ])
+    st.session_state[cache_key] = df
     return df
 
 
@@ -379,6 +386,8 @@ def save_master_df(df: pd.DataFrame, master_path: str, client_name: str = None):
     """店舗マスターを保存（Sheets + ローカル）"""
     _write_master_local(df, master_path)
     if client_name:
+        # セッションキャッシュを更新（次回renderでAPIを叩かないようにする）
+        st.session_state[f"_master_cache_{client_name}"] = df
         service = get_or_init_service()
         if service:
             try:
@@ -695,8 +704,9 @@ with settings_tab:
             sel_client = st.selectbox("クライアントを選択", list(clients_for_master.keys()), key="master_client_sel")
             m_path = clients_for_master[sel_client]["master_path"]
 
+            _loaded_master_df = load_master_df(m_path, sel_client)
             edited_master_df = st.data_editor(
-                load_master_df(m_path, sel_client),
+                _loaded_master_df,
                 num_rows="dynamic",
                 hide_index=True,
                 column_config={
@@ -722,9 +732,8 @@ with settings_tab:
                 st.success(f"✅ {sel_client} のマスターを保存しました（Google Sheetsに同期済み）")
                 st.rerun()
 
-            # 最寄り駅 未入力チェック（保存済みデータを対象）
-            _current_master = load_master_df(m_path, sel_client)
-            _missing_station = _current_master[_current_master["最寄り駅"].fillna("").str.strip() == ""]
+            # 最寄り駅 未入力チェック（同じキャッシュを使う・APIコールなし）
+            _missing_station = _loaded_master_df[_loaded_master_df["最寄り駅"].fillna("").str.strip() == ""]
             if not _missing_station.empty:
                 with st.expander(f"🗺️ 最寄り駅が未入力の店舗 {len(_missing_station)}件 ── Googleマップで確認して入力してください"):
                     st.caption("最寄り駅はデータ倉庫の分析に必要な情報です。下のリンクでGoogleマップを開き、確認してから上の表に入力・保存してください。")
