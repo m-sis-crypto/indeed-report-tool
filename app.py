@@ -24,7 +24,6 @@ from indeed_report import (
     build_rows_detail,
     build_rows_unknown,
     load_job_role_rules,
-    load_store_master,
     parse_period_from_filename,
 )
 
@@ -49,6 +48,7 @@ COLS = ["店舗", "職種", "雇用形態", "掲載開始", "掲載終了", "表
 # ============================================================
 WAREHOUSE_SPREADSHEET_ID = "1Vr7-IpCgEG4Gl2kRhb86Gxz4vYg8R9VpkTEpLNzvuF4"
 WAREHOUSE_SHEET_NAME     = "データ倉庫"
+CONFIG_SHEET_NAME        = "クライアント設定"
 WAREHOUSE_COLS = [
     "取込日", "クライアント", "店舗", "大カテゴリ", "業態", "エリア", "最寄り駅",
     "職種", "雇用形態", "集計開始", "集計終了",
@@ -69,10 +69,14 @@ GENRE_OPTIONS = [
     # 小売（先々追加予定）
 ]
 
-# ============================================================
-# 設定ファイルの読み書き
-# ============================================================
+_MASTER_COLS_JP = ["Indeed企業名", "正規化名", "大カテゴリ", "業態", "エリア", "最寄り駅", "キーワード（カンマ区切り）"]
+_MASTER_COLS_EN = ["store_name", "short_name", "category", "genre", "area", "nearest_station", "keywords"]
+_MASTER_JP2EN   = dict(zip(_MASTER_COLS_JP, _MASTER_COLS_EN))
+_MASTER_EN2JP   = dict(zip(_MASTER_COLS_EN, _MASTER_COLS_JP))
 
+# ============================================================
+# デフォルト設定
+# ============================================================
 _DEFAULT_CLIENTS = {
     "ALLSTARTED": {
         "master_path":    "masters/allstarted.csv",
@@ -98,14 +102,194 @@ _DEFAULT_RULES_DF = pd.DataFrame([
 ])
 
 
-def load_clients():
+# ============================================================
+# Sheets API サービス
+# ============================================================
+def get_service():
+    if "gcp_refresh_token" in st.secrets:
+        creds = Credentials.from_authorized_user_info({
+            "refresh_token": st.secrets["gcp_refresh_token"],
+            "token_uri":     st.secrets["gcp_token_uri"],
+            "client_id":     st.secrets["gcp_client_id"],
+            "client_secret": st.secrets["gcp_client_secret"],
+        }, SCOPES)
+    else:
+        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return build("sheets", "v4", credentials=creds)
+
+
+def get_or_init_service():
+    """サービスをsession_stateにキャッシュして返す。失敗時はNone。"""
+    if "_gs_service" not in st.session_state:
+        try:
+            st.session_state["_gs_service"] = get_service()
+        except Exception:
+            st.session_state["_gs_service"] = None
+    return st.session_state["_gs_service"]
+
+
+# ============================================================
+# クラウド設定ストア（Google Sheetsに永続化）
+# ============================================================
+def _ensure_sheet(service, spreadsheet_id: str, sheet_name: str):
+    spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    if not any(s["properties"]["title"] == sheet_name for s in spreadsheet["sheets"]):
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]},
+        ).execute()
+
+
+def _master_sheet_name(client_name: str) -> str:
+    return f"マスター_{client_name}"
+
+
+def load_clients_from_sheets(service) -> dict:
+    """WarehouseスプレッドシートのCONFIG_SHEET_NAMEシートからクライアント設定を読む"""
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+            range=f"'{CONFIG_SHEET_NAME}'!A:D"
+        ).execute()
+        values = result.get("values", [])
+        if len(values) < 2:
+            return {}
+        clients = {}
+        for row in values[1:]:
+            name = row[0].strip() if row else ""
+            if not name:
+                continue
+            clients[name] = {
+                "master_path":    f"masters/{name.lower()}.csv",
+                "spreadsheet_id": row[1].strip() if len(row) > 1 else "",
+                "sheet_pattern1": row[2].strip() if len(row) > 2 else "",
+                "sheet_pattern2": row[3].strip() if len(row) > 3 else "",
+            }
+        return clients
+    except Exception:
+        return {}
+
+
+def save_clients_to_sheets(service, clients: dict):
+    """クライアント設定をWarehouseスプレッドシートに保存"""
+    _ensure_sheet(service, WAREHOUSE_SPREADSHEET_ID, CONFIG_SHEET_NAME)
+    rows = [["クライアント名", "スプレッドシートID", "シート名①", "シート名②"]]
+    for name, cfg in clients.items():
+        rows.append([
+            name,
+            cfg.get("spreadsheet_id", ""),
+            cfg.get("sheet_pattern1", ""),
+            cfg.get("sheet_pattern2", ""),
+        ])
+    service.spreadsheets().values().clear(
+        spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+        range=f"'{CONFIG_SHEET_NAME}'!A:D"
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+        range=f"'{CONFIG_SHEET_NAME}'!A1",
+        valueInputOption="RAW",
+        body={"values": rows},
+    ).execute()
+
+
+def load_master_from_sheets(service, client_name: str) -> pd.DataFrame:
+    """Warehouseスプレッドシートからクライアントの店舗マスターを読む"""
+    sheet_name = _master_sheet_name(client_name)
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+            range=f"'{sheet_name}'!A:G"
+        ).execute()
+        values = result.get("values", [])
+        if len(values) < 2:
+            return pd.DataFrame(columns=_MASTER_COLS_JP)
+        header = values[0]
+        data = []
+        for row in values[1:]:
+            padded = row + [""] * (len(header) - len(row))
+            data.append(dict(zip(header, padded)))
+        df = pd.DataFrame(data).rename(columns=_MASTER_EN2JP)
+        for col in _MASTER_COLS_JP:
+            if col not in df.columns:
+                df[col] = ""
+        return df[_MASTER_COLS_JP]
+    except Exception:
+        return pd.DataFrame(columns=_MASTER_COLS_JP)
+
+
+def save_master_to_sheets(service, client_name: str, df: pd.DataFrame):
+    """クライアントの店舗マスターをWarehouseスプレッドシートに保存"""
+    sheet_name = _master_sheet_name(client_name)
+    _ensure_sheet(service, WAREHOUSE_SPREADSHEET_ID, sheet_name)
+    out = df.rename(columns=_MASTER_JP2EN)
+    rows = [_MASTER_COLS_EN]
+    for _, row in out.iterrows():
+        rows.append([str(row.get(col, "")) for col in _MASTER_COLS_EN])
+    service.spreadsheets().values().clear(
+        spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+        range=f"'{sheet_name}'!A:G"
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
+        range=f"'{sheet_name}'!A1",
+        valueInputOption="RAW",
+        body={"values": rows},
+    ).execute()
+
+
+# ============================================================
+# 設定ファイルの読み書き（Sheets優先・ローカルフォールバック）
+# ============================================================
+def load_clients() -> dict:
+    """クライアント設定を読む。Sheets → ローカルJSON → デフォルトの順。"""
+    if "_clients_cache" in st.session_state:
+        return st.session_state["_clients_cache"]
+
+    service = get_or_init_service()
+    if service:
+        sheets_data = load_clients_from_sheets(service)
+        if sheets_data:
+            st.session_state["_clients_cache"] = sheets_data
+            return sheets_data
+
+    # ローカルファイルにフォールバック
+    local_data = _DEFAULT_CLIENTS
     if CLIENTS_PATH.exists():
-        return json.loads(CLIENTS_PATH.read_text(encoding="utf-8"))
-    return _DEFAULT_CLIENTS
+        try:
+            local_data = json.loads(CLIENTS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # 初回起動時にSheetsへ自動マイグレーション
+    if service and local_data:
+        try:
+            save_clients_to_sheets(service, local_data)
+        except Exception:
+            pass
+
+    st.session_state["_clients_cache"] = local_data
+    return local_data
 
 
 def save_clients(clients: dict):
-    CLIENTS_PATH.write_text(json.dumps(clients, ensure_ascii=False, indent=2), encoding="utf-8")
+    """クライアント設定を保存（Sheets + ローカル）"""
+    # ローカル保存
+    try:
+        CLIENTS_PATH.write_text(json.dumps(clients, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    # セッションキャッシュ更新
+    st.session_state["_clients_cache"] = clients
+    # Sheets保存
+    service = get_or_init_service()
+    if service:
+        try:
+            save_clients_to_sheets(service, clients)
+        except Exception as e:
+            st.warning(f"クラウド同期に失敗しました（ローカル保存は完了）: {e}")
 
 
 def clients_to_df(clients: dict) -> pd.DataFrame:
@@ -149,44 +333,86 @@ def save_rules_df(df: pd.DataFrame):
     out.to_csv(RULES_PATH, index=False, encoding="utf-8-sig")
 
 
-def load_master_df(master_path: str) -> pd.DataFrame:
+def _write_master_local(df: pd.DataFrame, master_path: str):
+    """indeed_report.py互換のためローカルCSVに書き出す"""
     p = BASE_DIR / master_path
-    empty = pd.DataFrame(columns=["Indeed企業名", "正規化名", "大カテゴリ", "業態", "エリア", "最寄り駅", "キーワード（カンマ区切り）"])
+    p.parent.mkdir(exist_ok=True)
+    out = df.rename(columns=_MASTER_JP2EN)
+    cols = [c for c in _MASTER_COLS_EN if c in out.columns]
+    out[cols].to_csv(p, index=False, encoding="utf-8-sig")
+
+
+def load_master_df(master_path: str, client_name: str = None) -> pd.DataFrame:
+    """店舗マスターを読む。Sheets → ローカルCSV の順。"""
+    empty = pd.DataFrame(columns=_MASTER_COLS_JP)
+
+    service = get_or_init_service()
+    if client_name and service:
+        sheets_df = load_master_from_sheets(service, client_name)
+        if not sheets_df.empty:
+            # ローカルにも書き出してindeed_report.py互換を保つ
+            try:
+                _write_master_local(sheets_df, master_path)
+            except Exception:
+                pass
+            return sheets_df
+
+    # ローカルCSVにフォールバック
+    p = BASE_DIR / master_path
     if not p.exists():
         return empty
     with open(p, encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    if not rows:
+        rows_raw = list(csv.DictReader(f))
+    if not rows_raw:
         return empty
-    return pd.DataFrame([
+    df = pd.DataFrame([
         {
-            "Indeed企業名":          r["store_name"],
-            "正規化名":              r["short_name"],
-            "大カテゴリ":            r.get("category", ""),
-            "業態":                  r.get("genre", ""),
-            "エリア":                r.get("area", ""),
-            "最寄り駅":              r.get("nearest_station", ""),
+            "Indeed企業名":              r["store_name"],
+            "正規化名":                  r["short_name"],
+            "大カテゴリ":                r.get("category", ""),
+            "業態":                      r.get("genre", ""),
+            "エリア":                    r.get("area", ""),
+            "最寄り駅":                  r.get("nearest_station", ""),
             "キーワード（カンマ区切り）": r["keywords"],
         }
-        for r in rows
+        for r in rows_raw
     ])
+    # 初回起動時にSheetsへ自動マイグレーション
+    if client_name and service and not df.empty:
+        try:
+            save_master_to_sheets(service, client_name, df)
+        except Exception:
+            pass
+    return df
 
 
-def save_master_df(df: pd.DataFrame, master_path: str):
-    p = BASE_DIR / master_path
-    p.parent.mkdir(exist_ok=True)
-    out = df.rename(columns={
-        "Indeed企業名":          "store_name",
-        "正規化名":              "short_name",
-        "大カテゴリ":            "category",
-        "業態":                  "genre",
-        "エリア":                "area",
-        "最寄り駅":              "nearest_station",
-        "キーワード（カンマ区切り）": "keywords",
-    })
-    # 列順を固定
-    cols = [c for c in ["store_name", "short_name", "category", "genre", "area", "nearest_station", "keywords"] if c in out.columns]
-    out[cols].to_csv(p, index=False, encoding="utf-8-sig")
+def save_master_df(df: pd.DataFrame, master_path: str, client_name: str = None):
+    """店舗マスターを保存（Sheets + ローカル）"""
+    _write_master_local(df, master_path)
+    if client_name:
+        service = get_or_init_service()
+        if service:
+            try:
+                save_master_to_sheets(service, client_name, df)
+            except Exception as e:
+                st.warning(f"クラウド同期に失敗しました（ローカル保存は完了）: {e}")
+
+
+def master_df_to_list(df: pd.DataFrame) -> list:
+    """DataFrameをaggregate()等が期待するmaster listに変換"""
+    result = []
+    for _, row in df.iterrows():
+        keywords = [k.strip() for k in str(row.get("キーワード（カンマ区切り）", "")).split(",") if k.strip()]
+        result.append({
+            "store":           str(row.get("Indeed企業名", "")),
+            "short_name":      str(row.get("正規化名", "")),
+            "keywords":        keywords,
+            "category":        str(row.get("大カテゴリ", "")),
+            "genre":           str(row.get("業態", "")),
+            "area":            str(row.get("エリア", "")),
+            "nearest_station": str(row.get("最寄り駅", "")),
+        })
+    return result
 
 
 def get_rules():
@@ -196,10 +422,8 @@ def get_rules():
 # ============================================================
 # AI 正規化名推測
 # ============================================================
-def suggest_store_labels(company_names: list[str]) -> dict[str, dict]:
-    """Geminiで企業名→正規化名・大カテゴリ・業態を一括推測。
-    {元名: {normalized, category, genre}} を返す"""
-    import json
+def suggest_store_labels(company_names: list) -> dict:
+    """Geminiで企業名→正規化名・大カテゴリ・業態を一括推測。"""
     from google import genai
 
     api_key = st.secrets.get("gemini_api_key", "")
@@ -207,9 +431,8 @@ def suggest_store_labels(company_names: list[str]) -> dict[str, dict]:
         raise ValueError("Streamlit SecretsにGemini APIキー（gemini_api_key）が設定されていません")
 
     client = genai.Client(api_key=api_key)
-
     category_options = ["飲食", "美容", "小売", "医療・介護", "その他"]
-    genre_options = [g for g in GENRE_OPTIONS if g]  # 空文字を除く
+    genre_options = [g for g in GENRE_OPTIONS if g]
 
     names_text = "\n".join(f"- {n}" for n in company_names)
     prompt = f"""以下はIndeedの求人に掲載された企業名（店舗名）の一覧です。
@@ -241,10 +464,7 @@ def suggest_store_labels(company_names: list[str]) -> dict[str, dict]:
   ...
 ]"""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=prompt,
-    )
+    response = client.models.generate_content(model="gemini-2.5-flash-lite", contents=prompt)
     text = response.text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
@@ -262,23 +482,8 @@ def suggest_store_labels(company_names: list[str]) -> dict[str, dict]:
 
 
 # ============================================================
-# Sheets ヘルパー
+# Sheets ヘルパー（レポート書き込み用）
 # ============================================================
-def get_service():
-    if "gcp_refresh_token" in st.secrets:
-        creds = Credentials.from_authorized_user_info({
-            "refresh_token": st.secrets["gcp_refresh_token"],
-            "token_uri":     st.secrets["gcp_token_uri"],
-            "client_id":     st.secrets["gcp_client_id"],
-            "client_secret": st.secrets["gcp_client_secret"],
-        }, SCOPES)
-    else:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    return build("sheets", "v4", credentials=creds)
-
-
 def get_last_row(service, spreadsheet_id, sheet_name):
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
@@ -335,7 +540,6 @@ def append_to_sheet(service, spreadsheet_id, sheet_name, rows, next_row):
 # データ倉庫ヘルパー
 # ============================================================
 def ensure_warehouse_sheet(service):
-    """「データ倉庫」シートがなければ作成し、ヘッダーも追加する"""
     spreadsheet = service.spreadsheets().get(spreadsheetId=WAREHOUSE_SPREADSHEET_ID).execute()
     exists = any(s["properties"]["title"] == WAREHOUSE_SHEET_NAME for s in spreadsheet["sheets"])
     if not exists:
@@ -343,8 +547,6 @@ def ensure_warehouse_sheet(service):
             spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
             body={"requests": [{"addSheet": {"properties": {"title": WAREHOUSE_SHEET_NAME}}}]},
         ).execute()
-
-    # ヘッダー行がなければ追加
     result = service.spreadsheets().values().get(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
         range=f"'{WAREHOUSE_SHEET_NAME}'!A1:A1"
@@ -359,7 +561,6 @@ def ensure_warehouse_sheet(service):
 
 
 def build_warehouse_rows(client_name, data2, master, period_start, period_end):
-    """データ倉庫用の行を生成（詳細データ: 店舗×雇用形態×職種）"""
     today = date.today().strftime("%Y/%m/%d")
     store_labels = {
         e["short_name"]: (
@@ -368,7 +569,6 @@ def build_warehouse_rows(client_name, data2, master, period_start, period_end):
         )
         for e in master
     }
-
     rows = []
     for (short_name, emp_type, job_title) in sorted(data2.keys()):
         d = data2[(short_name, emp_type, job_title)]
@@ -420,6 +620,7 @@ with settings_tab:
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
+            key="clients_editor",
             column_config={
                 "クライアント名":    st.column_config.TextColumn("クライアント名", width="small"),
                 "スプレッドシートID": st.column_config.TextColumn("スプレッドシートID", width="large"),
@@ -427,11 +628,12 @@ with settings_tab:
                 "シート名②":         st.column_config.TextColumn("シート名②（詳細・省略可）", width="medium"),
             },
         )
-        st.caption("💡 店舗マスターファイルは `masters/クライアント名.csv` に自動保存されます。「🗂 店舗マスター」タブで編集できます。")
+        st.caption("💡 設定はGoogleスプレッドシートに保存されるため、アプリを再起動しても消えません。")
 
-        if st.button("💾 クライアントを保存", key="save_clients"):
-            save_clients(df_to_clients(edited_clients_df))
-            st.success("✅ 保存しました")
+        if st.button("💾 クライアントを保存", key="save_clients_btn"):
+            new_clients = df_to_clients(edited_clients_df)
+            save_clients(new_clients)
+            st.success("✅ 保存しました（Google Sheetsに同期済み）")
             st.rerun()
 
     # ─── 職種ルール ──────────────────────────────────────────
@@ -507,7 +709,7 @@ with settings_tab:
             m_path = clients_for_master[sel_client]["master_path"]
 
             edited_master_df = st.data_editor(
-                load_master_df(m_path),
+                load_master_df(m_path, sel_client),
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
@@ -527,15 +729,15 @@ with settings_tab:
                     "キーワード（カンマ区切り）": st.column_config.TextColumn("マッチキーワード（カンマ区切り）", width="large"),
                 },
             )
-            st.caption("💡 大カテゴリ・業態・エリア・最寄り駅はデータ倉庫の分析に使われます。キーワードが**すべて**含まれていれば一致します。")
+            st.caption("💡 大カテゴリ・業態・エリア・最寄り駅はデータ倉庫の分析に使われます。設定はGoogle Sheetsに保存されるため再起動後も維持されます。")
 
             if st.button("💾 マスターを保存", key="save_master"):
-                save_master_df(edited_master_df, m_path)
-                st.success(f"✅ {m_path} を保存しました")
+                save_master_df(edited_master_df, m_path, sel_client)
+                st.success(f"✅ {sel_client} のマスターを保存しました（Google Sheetsに同期済み）")
                 st.rerun()
 
             # 最寄り駅 未入力チェック（保存済みデータを対象）
-            _current_master = load_master_df(m_path)
+            _current_master = load_master_df(m_path, sel_client)
             _missing_station = _current_master[_current_master["最寄り駅"].fillna("").str.strip() == ""]
             if not _missing_station.empty:
                 with st.expander(f"🗺️ 最寄り駅が未入力の店舗 {len(_missing_station)}件 ── Googleマップで確認して入力してください"):
@@ -594,14 +796,14 @@ with settings_tab:
                     col_a, col_b = st.columns(2)
                     with col_a:
                         if st.button("➕ 既存に追記", key="master_append"):
-                            existing = load_master_df(m_path)
+                            existing = load_master_df(m_path, sel_client)
                             merged = pd.concat([existing, df_mi], ignore_index=True).drop_duplicates(subset=["Indeed企業名"])
-                            save_master_df(merged, m_path)
+                            save_master_df(merged, m_path, sel_client)
                             st.success(f"✅ 追記しました（計{len(merged)}件）")
                             st.rerun()
                     with col_b:
                         if st.button("🔄 上書き（全件置き換え）", key="master_replace"):
-                            save_master_df(df_mi, m_path)
+                            save_master_df(df_mi, m_path, sel_client)
                             st.success(f"✅ 上書きしました（{len(df_mi)}件）")
                             st.rerun()
 
@@ -614,7 +816,7 @@ with settings_tab:
                     if not unique_names:
                         st.error("❌ 「企業名」列が見つかりません。IndeedのCSVか確認してください。")
                     else:
-                        existing = load_master_df(m_path)
+                        existing = load_master_df(m_path, sel_client)
                         registered = set(existing["Indeed企業名"].tolist())
                         new_names = [n for n in unique_names if n not in registered]
 
@@ -632,12 +834,12 @@ with settings_tab:
 
                         if new_names:
                             df_new = pd.DataFrame({
-                                "Indeed企業名": new_names,
-                                "正規化名": ["" for _ in new_names],
-                                "大カテゴリ": ["" for _ in new_names],
-                                "業態": ["" for _ in new_names],
-                                "エリア": [area_map.get(n, "") for n in new_names],
-                                "最寄り駅": ["" for _ in new_names],
+                                "Indeed企業名":              new_names,
+                                "正規化名":                  ["" for _ in new_names],
+                                "大カテゴリ":                ["" for _ in new_names],
+                                "業態":                      ["" for _ in new_names],
+                                "エリア":                    [area_map.get(n, "") for n in new_names],
+                                "最寄り駅":                  ["" for _ in new_names],
                                 "キーワード（カンマ区切り）": [n for n in new_names],
                             })
 
@@ -698,7 +900,7 @@ with settings_tab:
                                     st.warning("正規化名が入力されていません。")
                                 else:
                                     merged = pd.concat([existing, to_add], ignore_index=True).drop_duplicates(subset=["Indeed企業名"])
-                                    save_master_df(merged, m_path)
+                                    save_master_df(merged, m_path, sel_client)
                                     _saved_no_station = to_add[to_add["最寄り駅"].fillna("").str.strip() == ""]
                                     st.success(f"✅ {len(to_add)}社を追加しました（計{len(merged)}件）")
                                     if not _saved_no_station.empty:
@@ -747,16 +949,17 @@ with main_tab:
     rows = list(csv.DictReader(io.StringIO(content)))
     st.caption(f"読み込み: {len(rows)}行")
 
-    # 集計
+    # 集計（マスターはSheetsから直接取得）
     config = CLIENTS[client_name]
-    master = load_store_master(config["master_path"])
+    master_df = load_master_df(config["master_path"], client_name)
+    master = master_df_to_list(master_df)
     if not master:
         st.warning(
-            f"⚠️ `{config['master_path']}` が見つかりません。"
+            f"⚠️ {client_name} の店舗マスターが見つかりません。"
             "「⚙️ 設定」→「🗂 店舗マスター」タブで店舗を登録してください。"
         )
         st.stop()
-    rules  = get_rules()
+    rules = get_rules()
 
     data1, unmatched = aggregate(rows, master)
     data2, _         = aggregate_detail(rows, master, rules)
@@ -811,11 +1014,10 @@ with main_tab:
         st.stop()
 
     # 最寄り駅 未入力の店舗があれば警告（書き込みはブロックしない）
-    _master_df_check = load_master_df(config["master_path"])
     _stores_in_data = {e["short_name"] for e in master}
-    _missing_station_write = _master_df_check[
-        _master_df_check["正規化名"].isin(_stores_in_data) &
-        (_master_df_check["最寄り駅"].fillna("").str.strip() == "")
+    _missing_station_write = master_df[
+        master_df["正規化名"].isin(_stores_in_data) &
+        (master_df["最寄り駅"].fillna("").str.strip() == "")
     ]
     if not _missing_station_write.empty:
         _missing_names = "、".join(_missing_station_write["正規化名"].tolist())
