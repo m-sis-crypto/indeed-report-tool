@@ -120,14 +120,16 @@ def get_service():
     return build("sheets", "v4", credentials=creds)
 
 
+@st.cache_resource(show_spinner=False)
+def _build_service_cached():
+    try:
+        return get_service()
+    except Exception:
+        return None
+
+
 def get_or_init_service():
-    """サービスをsession_stateにキャッシュして返す。失敗時はNone。"""
-    if "_gs_service" not in st.session_state:
-        try:
-            st.session_state["_gs_service"] = get_service()
-        except Exception:
-            st.session_state["_gs_service"] = None
-    return st.session_state["_gs_service"]
+    return _build_service_cached()
 
 
 # ============================================================
@@ -263,13 +265,6 @@ def load_clients() -> dict:
         except Exception:
             pass
 
-    # 初回起動時にSheetsへ自動マイグレーション
-    if service and local_data:
-        try:
-            save_clients_to_sheets(service, local_data)
-        except Exception:
-            pass
-
     st.session_state["_clients_cache"] = local_data
     return local_data
 
@@ -377,12 +372,6 @@ def load_master_df(master_path: str, client_name: str = None) -> pd.DataFrame:
         }
         for r in rows_raw
     ])
-    # 初回起動時にSheetsへ自動マイグレーション
-    if client_name and service and not df.empty:
-        try:
-            save_master_to_sheets(service, client_name, df)
-        except Exception:
-            pass
     return df
 
 
