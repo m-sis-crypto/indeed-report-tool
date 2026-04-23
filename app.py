@@ -7,6 +7,7 @@ Indeed レポート Streamlit UI
 import csv
 import io
 import json
+import urllib.parse
 from datetime import date
 from pathlib import Path
 
@@ -533,6 +534,19 @@ with settings_tab:
                 st.success(f"✅ {m_path} を保存しました")
                 st.rerun()
 
+            # 最寄り駅 未入力チェック（保存済みデータを対象）
+            _current_master = load_master_df(m_path)
+            _missing_station = _current_master[_current_master["最寄り駅"].fillna("").str.strip() == ""]
+            if not _missing_station.empty:
+                with st.expander(f"🗺️ 最寄り駅が未入力の店舗 {len(_missing_station)}件 ── Googleマップで確認して入力してください"):
+                    st.caption("最寄り駅はデータ倉庫の分析に必要な情報です。下のリンクでGoogleマップを開き、確認してから上の表に入力・保存してください。")
+                    for _, _row in _missing_station.iterrows():
+                        _name = str(_row["正規化名"]).strip() or str(_row["Indeed企業名"]).strip()
+                        _area = str(_row.get("エリア", "")).strip()
+                        _query = urllib.parse.quote(f"{_name} {_area}".strip())
+                        _maps_url = f"https://www.google.com/maps/search/{_query}"
+                        st.markdown(f"- **{_name}**（{_area}） → [Googleマップで検索]({_maps_url})")
+
             st.divider()
             st.subheader("CSVからインポート")
 
@@ -665,6 +679,19 @@ with settings_tab:
                                 },
                             )
                             st.caption("正規化名を入力してから保存してください。空白の行は保存されません。")
+
+                            # 最寄り駅が空の行のGoogleマップリンクを事前表示
+                            _no_station = df_new[df_new["最寄り駅"].fillna("").str.strip() == ""]
+                            if not _no_station.empty:
+                                with st.expander(f"🗺️ 最寄り駅が未入力の店舗 {len(_no_station)}件 ── 保存前にGoogleマップで確認できます"):
+                                    st.caption("最寄り駅はデータ倉庫の分析に必要です。下のリンクでGoogleマップを開いて確認してから、上の表の「最寄り駅」列に入力してください。")
+                                    for _, _row in _no_station.iterrows():
+                                        _name = str(_row["正規化名"]).strip() or str(_row["Indeed企業名"]).strip()
+                                        _area = str(_row.get("エリア", "")).strip()
+                                        _query = urllib.parse.quote(f"{_name} {_area}".strip())
+                                        _maps_url = f"https://www.google.com/maps/search/{_query}"
+                                        st.markdown(f"- **{_name}**（{_area}） → [Googleマップで検索]({_maps_url})")
+
                             if st.button("💾 マスターに追加", key="master_from_indeed"):
                                 to_add = edited_new[edited_new["正規化名"].str.strip() != ""]
                                 if to_add.empty:
@@ -672,7 +699,10 @@ with settings_tab:
                                 else:
                                     merged = pd.concat([existing, to_add], ignore_index=True).drop_duplicates(subset=["Indeed企業名"])
                                     save_master_df(merged, m_path)
+                                    _saved_no_station = to_add[to_add["最寄り駅"].fillna("").str.strip() == ""]
                                     st.success(f"✅ {len(to_add)}社を追加しました（計{len(merged)}件）")
+                                    if not _saved_no_station.empty:
+                                        st.warning(f"⚠️ {len(_saved_no_station)}社の最寄り駅が未入力です。設定タブの「🗂 店舗マスター」から後で追加できます。")
                                     st.rerun()
                         else:
                             st.success("✅ すべての企業名が既にマスターに登録されています")
@@ -779,6 +809,21 @@ with main_tab:
     if not (sheet_rows1 or sheet_rows2 or unknown_rows):
         st.warning("書き込めるデータがありません。クライアントのマスターCSVを確認してください。")
         st.stop()
+
+    # 最寄り駅 未入力の店舗があれば警告（書き込みはブロックしない）
+    _master_df_check = load_master_df(config["master_path"])
+    _stores_in_data = {e["short_name"] for e in master}
+    _missing_station_write = _master_df_check[
+        _master_df_check["正規化名"].isin(_stores_in_data) &
+        (_master_df_check["最寄り駅"].fillna("").str.strip() == "")
+    ]
+    if not _missing_station_write.empty:
+        _missing_names = "、".join(_missing_station_write["正規化名"].tolist())
+        st.warning(
+            f"⚠️ **最寄り駅が未入力の店舗があります（{len(_missing_station_write)}件）**: {_missing_names}\n\n"
+            "このまま書き込めますが、データ倉庫に最寄り駅が記録されません。"
+            "「⚙️ 設定 → 🗂 店舗マスター」から後で入力できます。"
+        )
 
     if st.button("🚀 スプレッドシートに書き込む", type="primary"):
         with st.spinner("書き込み中..."):
