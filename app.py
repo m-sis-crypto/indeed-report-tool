@@ -195,8 +195,9 @@ def get_rules():
 # ============================================================
 # AI 正規化名推測
 # ============================================================
-def suggest_normalized_names(company_names: list[str]) -> dict[str, str]:
-    """GeminiでIndeed企業名→正規化名を一括推測。{元名: 推測名} を返す"""
+def suggest_store_labels(company_names: list[str]) -> dict[str, dict]:
+    """Geminiで企業名→正規化名・大カテゴリ・業態を一括推測。
+    {元名: {normalized, category, genre}} を返す"""
     import json
     from google import genai
 
@@ -206,22 +207,36 @@ def suggest_normalized_names(company_names: list[str]) -> dict[str, str]:
 
     client = genai.Client(api_key=api_key)
 
+    category_options = ["飲食", "美容", "小売", "医療・介護", "その他"]
+    genre_options = [g for g in GENRE_OPTIONS if g]  # 空文字を除く
+
     names_text = "\n".join(f"- {n}" for n in company_names)
     prompt = f"""以下はIndeedの求人に掲載された企業名（店舗名）の一覧です。
-それぞれを、社内レポートで使う短くわかりやすい「正規化名」に変換してください。
+それぞれについて、正規化名・大カテゴリ・業態を推測してください。
 
-【変換ルール】
+【正規化名のルール】
 - 業態説明（例：「中華ビストロ」「焼鳥ビストロ」「New」）は除く
 - 英語サブタイトル（例：「- Nonotori」）は除く
 - 支店・エリア名（例：人形町・新宿・赤坂）はそのまま残す
 - シンプルで短い名前にする
+
+【大カテゴリの選択肢（必ずこの中から選ぶ）】
+{", ".join(category_options)}
+
+【業態の選択肢（必ずこの中から選ぶ）】
+{", ".join(genre_options)}
 
 【企業名一覧】
 {names_text}
 
 【出力形式】必ずJSONのみを返してください（説明文不要）
 [
-  {{"original": "元の企業名", "normalized": "推測した正規化名"}},
+  {{
+    "original": "元の企業名",
+    "normalized": "推測した正規化名",
+    "category": "大カテゴリ",
+    "genre": "業態"
+  }},
   ...
 ]"""
 
@@ -230,13 +245,19 @@ def suggest_normalized_names(company_names: list[str]) -> dict[str, str]:
         contents=prompt,
     )
     text = response.text.strip()
-    # ```json ... ``` を除去
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
     parsed = json.loads(text.strip())
-    return {item["original"]: item["normalized"] for item in parsed}
+    return {
+        item["original"]: {
+            "normalized": item.get("normalized", ""),
+            "category":   item.get("category", ""),
+            "genre":      item.get("genre", ""),
+        }
+        for item in parsed
+    }
 
 
 # ============================================================
@@ -607,15 +628,15 @@ with settings_tab:
                             })
 
                             # AI推測ボタン
-                            if st.button("🤖 AIで正規化名を推測（Gemini）", key="ai_suggest"):
-                                with st.spinner("Geminiが正規化名を考え中..."):
+                            if st.button("🤖 AIで正規化名・大カテゴリ・業態を推測（Gemini）", key="ai_suggest"):
+                                with st.spinner("Geminiが推測中..."):
                                     try:
-                                        suggestions = suggest_normalized_names(new_names)
-                                        df_new["正規化名"] = df_new["Indeed企業名"].map(
-                                            lambda x: suggestions.get(x, "")
-                                        )
+                                        suggestions = suggest_store_labels(new_names)
+                                        df_new["正規化名"]  = df_new["Indeed企業名"].map(lambda x: suggestions.get(x, {}).get("normalized", ""))
+                                        df_new["大カテゴリ"] = df_new["Indeed企業名"].map(lambda x: suggestions.get(x, {}).get("category", ""))
+                                        df_new["業態"]      = df_new["Indeed企業名"].map(lambda x: suggestions.get(x, {}).get("genre", ""))
                                         st.session_state["ai_suggested_df"] = df_new.copy()
-                                        st.success("✅ 推測完了！内容を確認して修正してから保存してください。")
+                                        st.success("✅ 推測完了！内容を確認・修正してから保存してください。")
                                     except Exception as e:
                                         st.error(f"❌ AI推測エラー: {e}")
 
