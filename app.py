@@ -538,13 +538,23 @@ with settings_tab:
 
                         st.info(f"企業名 {len(unique_names)}社中、未登録: **{len(new_names)}社**")
 
+                        # 市区町村列からエリアを企業名ごとに取得（最初の出現値）
+                        area_map = {}
+                        if "市区町村" in df_indeed.columns:
+                            area_map = (
+                                df_indeed.dropna(subset=["企業名", "市区町村"])
+                                .groupby("企業名")["市区町村"]
+                                .first()
+                                .to_dict()
+                            )
+
                         if new_names:
                             df_new = pd.DataFrame({
                                 "Indeed企業名": new_names,
                                 "正規化名": ["" for _ in new_names],
                                 "大カテゴリ": ["" for _ in new_names],
                                 "業態": ["" for _ in new_names],
-                                "エリア": ["" for _ in new_names],
+                                "エリア": [area_map.get(n, "") for n in new_names],
                                 "最寄り駅": ["" for _ in new_names],
                                 "キーワード（カンマ区切り）": [n for n in new_names],
                             })
