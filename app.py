@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Indeed レポート Streamlit UI
 起動: streamlit run app.py  （または 起動.bat をダブルクリック）
@@ -607,7 +607,6 @@ with settings_tab:
         edited_clients_df = st.data_editor(
             clients_to_df(clients_cfg),
             num_rows="dynamic",
-            use_container_width=True,
             hide_index=True,
             key="clients_editor",
             column_config={
@@ -633,7 +632,6 @@ with settings_tab:
         edited_rules_df = st.data_editor(
             load_rules_df(),
             num_rows="dynamic",
-            use_container_width=True,
             hide_index=True,
             column_config={
                 "正規化後の職種名":           st.column_config.TextColumn("正規化後の職種名", width="medium"),
@@ -670,7 +668,7 @@ with settings_tab:
                 elif "keyword" in c.lower() or "キーワード" in c:
                     col_map[c] = "キーワード（カンマ区切り）"
             df_ri = df_ri.rename(columns=col_map)[["正規化後の職種名", "キーワード（カンマ区切り）"]]
-            st.dataframe(df_ri, use_container_width=True, hide_index=True)
+            st.dataframe(df_ri, hide_index=True)
             st.caption(f"{len(df_ri)}行を読み込みました")
             col_a, col_b = st.columns(2)
             with col_a:
@@ -700,7 +698,6 @@ with settings_tab:
             edited_master_df = st.data_editor(
                 load_master_df(m_path, sel_client),
                 num_rows="dynamic",
-                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "Indeed企業名":          st.column_config.TextColumn("Indeed企業名（CSVの表記通りに入力）", width="large"),
@@ -780,7 +777,7 @@ with settings_tab:
                         if col not in df_mi.columns:
                             df_mi[col] = ""
                     df_mi = df_mi[["Indeed企業名", "正規化名", "大カテゴリ", "業態", "キーワード（カンマ区切り）"]]
-                    st.dataframe(df_mi, use_container_width=True, hide_index=True)
+                    st.dataframe(df_mi, hide_index=True)
                     st.caption(f"{len(df_mi)}行を読み込みました")
                     col_a, col_b = st.columns(2)
                     with col_a:
@@ -851,7 +848,6 @@ with settings_tab:
 
                             edited_new = st.data_editor(
                                 df_new,
-                                use_container_width=True,
                                 hide_index=True,
                                 column_config={
                                     "Indeed企業名":          st.column_config.TextColumn("Indeed企業名", width="large"),
@@ -972,7 +968,7 @@ with main_tab:
     with tab1:
         if sheet_rows1:
             df1 = pd.DataFrame(sheet_rows1, columns=COLS)
-            st.dataframe(df1, use_container_width=True, hide_index=True)
+            st.dataframe(df1, hide_index=True)
             st.caption(f"{len(sheet_rows1)}行")
         else:
             st.info("書き込むデータがありません（すべて未マッチ）")
@@ -980,7 +976,7 @@ with main_tab:
     with tab2:
         if sheet_rows2:
             df2 = pd.DataFrame(sheet_rows2, columns=COLS)
-            st.dataframe(df2, use_container_width=True, hide_index=True)
+            st.dataframe(df2, hide_index=True)
             st.caption(f"{len(sheet_rows2)}行")
         else:
             st.info("書き込むデータがありません（すべて未マッチ）")
@@ -988,7 +984,7 @@ with main_tab:
     with tab3:
         if unknown_rows:
             df3 = pd.DataFrame(unknown_rows, columns=COLS)
-            st.dataframe(df3, use_container_width=True, hide_index=True)
+            st.dataframe(df3, hide_index=True)
             st.caption(f"{len(unknown_rows)}行（両シートの末尾に追記されます）")
         else:
             st.info("雇用形態不明の行はありません")
