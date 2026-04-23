@@ -49,11 +49,13 @@ def load_store_master(master_path):
         for row in csv.DictReader(f):
             keywords = [kw.strip() for kw in row['keywords'].split(',')]
             master.append({
-                'store':      row['store_name'],
-                'short_name': row['short_name'],
-                'keywords':   keywords,
-                'category':   row.get('category', ''),
-                'genre':      row.get('genre', ''),
+                'store':           row['store_name'],
+                'short_name':      row['short_name'],
+                'keywords':        keywords,
+                'category':        row.get('category', ''),
+                'genre':           row.get('genre', ''),
+                'area':            row.get('area', ''),
+                'nearest_station': row.get('nearest_station', ''),
             })
     return master
 

@@ -49,7 +49,7 @@ COLS = ["店舗", "職種", "雇用形態", "掲載開始", "掲載終了", "表
 WAREHOUSE_SPREADSHEET_ID = "1Vr7-IpCgEG4Gl2kRhb86Gxz4vYg8R9VpkTEpLNzvuF4"
 WAREHOUSE_SHEET_NAME     = "データ倉庫"
 WAREHOUSE_COLS = [
-    "取込日", "クライアント", "店舗", "大カテゴリ", "業態",
+    "取込日", "クライアント", "店舗", "大カテゴリ", "業態", "エリア", "最寄り駅",
     "職種", "雇用形態", "集計開始", "集計終了",
     "表示回数", "クリック数", "応募開始数", "応募数", "費用",
 ]
@@ -150,7 +150,7 @@ def save_rules_df(df: pd.DataFrame):
 
 def load_master_df(master_path: str) -> pd.DataFrame:
     p = BASE_DIR / master_path
-    empty = pd.DataFrame(columns=["Indeed企業名", "正規化名", "大カテゴリ", "業態", "キーワード（カンマ区切り）"])
+    empty = pd.DataFrame(columns=["Indeed企業名", "正規化名", "大カテゴリ", "業態", "エリア", "最寄り駅", "キーワード（カンマ区切り）"])
     if not p.exists():
         return empty
     with open(p, encoding="utf-8-sig") as f:
@@ -163,6 +163,8 @@ def load_master_df(master_path: str) -> pd.DataFrame:
             "正規化名":              r["short_name"],
             "大カテゴリ":            r.get("category", ""),
             "業態":                  r.get("genre", ""),
+            "エリア":                r.get("area", ""),
+            "最寄り駅":              r.get("nearest_station", ""),
             "キーワード（カンマ区切り）": r["keywords"],
         }
         for r in rows
@@ -177,10 +179,12 @@ def save_master_df(df: pd.DataFrame, master_path: str):
         "正規化名":              "short_name",
         "大カテゴリ":            "category",
         "業態":                  "genre",
+        "エリア":                "area",
+        "最寄り駅":              "nearest_station",
         "キーワード（カンマ区切り）": "keywords",
     })
     # 列順を固定
-    cols = [c for c in ["store_name", "short_name", "category", "genre", "keywords"] if c in out.columns]
+    cols = [c for c in ["store_name", "short_name", "category", "genre", "area", "nearest_station", "keywords"] if c in out.columns]
     out[cols].to_csv(p, index=False, encoding="utf-8-sig")
 
 
@@ -288,14 +292,20 @@ def ensure_warehouse_sheet(service):
 def build_warehouse_rows(client_name, data2, master, period_start, period_end):
     """データ倉庫用の行を生成（詳細データ: 店舗×雇用形態×職種）"""
     today = date.today().strftime("%Y/%m/%d")
-    store_labels = {e["short_name"]: (e.get("category", ""), e.get("genre", "")) for e in master}
+    store_labels = {
+        e["short_name"]: (
+            e.get("category", ""), e.get("genre", ""),
+            e.get("area", ""), e.get("nearest_station", ""),
+        )
+        for e in master
+    }
 
     rows = []
     for (short_name, emp_type, job_title) in sorted(data2.keys()):
         d = data2[(short_name, emp_type, job_title)]
-        cat, genre = store_labels.get(short_name, ("", ""))
+        cat, genre, area, station = store_labels.get(short_name, ("", "", "", ""))
         rows.append([
-            today, client_name, short_name, cat, genre,
+            today, client_name, short_name, cat, genre, area, station,
             job_title, emp_type, period_start, period_end,
             d["表示回数"], d["クリック数"], d["応募開始数"], d["応募数"],
             round(d["費用"]),
@@ -307,7 +317,7 @@ def append_to_warehouse(service, warehouse_rows):
     ensure_warehouse_sheet(service)
     last = get_last_row(service, WAREHOUSE_SPREADSHEET_ID, WAREHOUSE_SHEET_NAME)
     next_row = last + 1
-    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:N{next_row + len(warehouse_rows) - 1}"
+    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:P{next_row + len(warehouse_rows) - 1}"
     service.spreadsheets().values().update(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
         range=range_str,
@@ -443,10 +453,12 @@ with settings_tab:
                         "業態", width="medium",
                         options=GENRE_OPTIONS,
                     ),
+                    "エリア":                st.column_config.TextColumn("エリア（例：新宿・渋谷・銀座）", width="medium"),
+                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（例：新宿駅）", width="medium"),
                     "キーワード（カンマ区切り）": st.column_config.TextColumn("マッチキーワード（カンマ区切り）", width="large"),
                 },
             )
-            st.caption("💡 大カテゴリ・業態はデータ倉庫の分析に使われます。キーワードが**すべて**含まれていれば一致します。")
+            st.caption("💡 大カテゴリ・業態・エリア・最寄り駅はデータ倉庫の分析に使われます。キーワードが**すべて**含まれていれば一致します。")
 
             if st.button("💾 マスターを保存", key="save_master"):
                 save_master_df(edited_master_df, m_path)
@@ -532,6 +544,8 @@ with settings_tab:
                                 "正規化名": ["" for _ in new_names],
                                 "大カテゴリ": ["" for _ in new_names],
                                 "業態": ["" for _ in new_names],
+                                "エリア": ["" for _ in new_names],
+                                "最寄り駅": ["" for _ in new_names],
                                 "キーワード（カンマ区切り）": [n for n in new_names],
                             })
                             edited_new = st.data_editor(
@@ -549,6 +563,8 @@ with settings_tab:
                                         "業態", width="medium",
                                         options=GENRE_OPTIONS,
                                     ),
+                                    "エリア":                st.column_config.TextColumn("エリア（例：新宿・渋谷）", width="medium"),
+                                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（例：新宿駅）", width="medium"),
                                     "キーワード（カンマ区切り）": st.column_config.TextColumn("キーワード（カンマ区切り）", width="large"),
                                 },
                             )
