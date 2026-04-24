@@ -240,7 +240,8 @@ def main():
     for i, row in enumerate(data_rows):
         url = row[COL_URL] if len(row) > COL_URL else ""
         catchphrase = row[COL_CATCHPHRASE] if len(row) > COL_CATCHPHRASE else ""
-        if url and not catchphrase:
+        # URLがhttpで始まる行のみ対象（古い形式の表示回数等を除外）
+        if url and url.startswith("http") and not catchphrase:
             targets.append((i + 2, row))  # sheet_row（1始まり + ヘッダー行）
 
     print(f"  取得対象（URLあり・キャッチコピー空）: {len(targets)}件\n")
