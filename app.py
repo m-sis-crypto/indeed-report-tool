@@ -482,6 +482,146 @@ def suggest_store_labels(company_names: list) -> dict:
 
 
 # ============================================================
+# Indeed 求人ページ スクレイピング
+# ============================================================
+def scrape_job_details(url: str, timeout: int = 8) -> tuple:
+    """Indeed求人ページからキャッチコピーと写真URLを取得する。
+    Returns: (catchphrase: str, photo_url: str)  取得失敗時は ("", "")
+    """
+    if not url:
+        return "", ""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            ),
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # キャッチコピーを探す（優先度順）
+        catchphrase = ""
+        for sel in [
+            # PRテキスト専用ブロック（ブックマークアイコン付きカード）
+            "[data-testid='pr-text']",
+            "[class*='prText']",
+            "[class*='pr-text']",
+            "[class*='prDescription']",
+            "[class*='pr_description']",
+            "[class*='PrDescription']",
+            # 求人説明の先頭段落（代替）
+            "[data-testid='jobDescriptionText'] > p:first-of-type",
+            "#jobDescriptionText > p:first-of-type",
+        ]:
+            el = soup.select_one(sel)
+            if el:
+                text = el.get_text(separator="", strip=True)
+                if len(text) >= 20:
+                    catchphrase = text[:500]  # 上限500文字
+                    break
+
+        # 写真URLを探す（求人ページのメイン画像）
+        photo_url = ""
+        for sel in [
+            "[class*='jobPhoto'] img",
+            "[class*='companyPhoto'] img",
+            "[class*='heroImage'] img",
+            "[class*='headerImage'] img",
+            "[class*='jobImage'] img",
+            "[data-testid*='photo'] img",
+            ".jobsearch-JobComponent-embeddedHeader img",
+        ]:
+            img = soup.select_one(sel)
+            if img:
+                src = img.get("src", "") or img.get("data-src", "")
+                if src and not src.endswith(".gif"):
+                    photo_url = src
+                    break
+
+        return catchphrase, photo_url
+
+    except Exception:
+        return "", ""
+
+
+def describe_photo(photo_url: str) -> str:
+    """写真URLをGeminiに渡して10文字程度の説明文を生成する。
+    Returns: 説明文（例：「内装写真（カウンター席）」）または ""
+    """
+    if not photo_url:
+        return ""
+    try:
+        import base64
+        import requests as _req
+        from google import genai
+
+        api_key = st.secrets.get("gemini_api_key", "")
+        if not api_key:
+            return ""
+
+        img_resp = _req.get(photo_url, timeout=6)
+        img_resp.raise_for_status()
+        img_data = base64.b64encode(img_resp.content).decode()
+
+        content_type = img_resp.headers.get("Content-Type", "image/jpeg")
+        if "png" in content_type:
+            mime_type = "image/png"
+        elif "webp" in content_type:
+            mime_type = "image/webp"
+        else:
+            mime_type = "image/jpeg"
+
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=[{
+                "parts": [
+                    {
+                        "text": (
+                            "この求人写真を15文字以内で一言説明してください。"
+                            "例：「内装写真（カウンター席）」「外観写真（夜景）」"
+                            "「スタッフ写真（女性2名）」「料理写真（寿司盛り合わせ）」"
+                            "のような形式で。説明文のみ返してください。"
+                        )
+                    },
+                    {"inline_data": {"mime_type": mime_type, "data": img_data}},
+                ]
+            }]
+        )
+        return response.text.strip()
+
+    except Exception:
+        return ""
+
+
+def batch_scrape(rows_raw: list) -> dict:
+    """URLリストを順番にスクレイピングしてキャッシュを返す。
+    Returns: {url: (catchphrase, photo_desc)}
+    """
+    unique_urls = list(dict.fromkeys(
+        r.get("求人URL", "") for r in rows_raw if r.get("求人URL", "")
+    ))
+    if not unique_urls:
+        return {}
+
+    result = {}
+    pb = st.progress(0.0, text="求人ページを取得中...")
+    for i, url in enumerate(unique_urls):
+        catchphrase, photo_url = scrape_job_details(url)
+        photo_desc = describe_photo(photo_url) if photo_url else ""
+        result[url] = (catchphrase, photo_desc)
+        pb.progress((i + 1) / len(unique_urls), text=f"取得中… {i+1}/{len(unique_urls)}")
+    pb.empty()
+    return result
+
+
+# ============================================================
 # Sheets ヘルパー（レポート書き込み用）
 # ============================================================
 def get_last_row(service, spreadsheet_id, sheet_name):
@@ -560,10 +700,13 @@ def ensure_warehouse_sheet(service):
         ).execute()
 
 
-def build_warehouse_rows(client_name, rows_raw, master, rules, period_start, period_end):
-    """1求人1行でデータ倉庫用の行リストを生成する。"""
+def build_warehouse_rows(client_name, rows_raw, master, rules, period_start, period_end, scraped=None):
+    """1求人1行でデータ倉庫用の行リストを生成する。
+    scraped: {url: (catchphrase, photo_desc)} — batch_scrape() の結果を渡すとキャッチコピー・写真説明が入る
+    """
     from indeed_report import normalize_store, extract_employment_type, extract_job_title, to_int, to_float
     today = date.today().strftime("%Y/%m/%d")
+    scraped = scraped or {}
     store_labels = {
         e["short_name"]: (
             e.get("category", ""), e.get("genre", ""),
@@ -579,18 +722,20 @@ def build_warehouse_rows(client_name, rows_raw, master, rules, period_start, per
         emp_type  = extract_employment_type(row["求人"], row.get("キャンペーン", ""))
         job_title = extract_job_title(row["求人"], rules)
         cat, genre, area, station = store_labels.get(short_name, ("", "", "", ""))
+        url = row.get("求人URL", "")
+        catchphrase, photo_desc = scraped.get(url, ("", ""))
         out.append([
             today, client_name, short_name, cat, genre, area, station,
             job_title, emp_type,
             row.get("参照番号", ""),
             row.get("求人", ""),
-            row.get("求人URL", ""),
+            url,
             period_start, period_end,
             to_int(row["表示回数"]), to_int(row["クリック数"]),
             to_int(row["応募開始数"]), to_int(row["応募数"]),
             round(to_float(row["費用"])),
-            "",  # キャッチコピー（Phase 2で実装）
-            "",  # 写真説明（Phase 2で実装）
+            catchphrase,
+            photo_desc,
         ])
     return out
 
@@ -1036,7 +1181,20 @@ with main_tab:
             "「⚙️ 設定 → 🗂 店舗マスター」から後で入力できます。"
         )
 
+    do_scrape = st.checkbox(
+        "🔍 キャッチコピー・写真も取得する（1求人あたり約5〜10秒・URL数分かかります）",
+        value=False,
+    )
+
     if st.button("🚀 スプレッドシートに書き込む", type="primary"):
+        # スクレイピングはボタン押下後・メイン書き込み前に実行
+        scraped_data = {}
+        if do_scrape and rows:
+            st.info(f"🔍 {len(set(r.get('求人URL','') for r in rows if r.get('求人URL')))}件の求人ページからキャッチコピー・写真を取得します...")
+            scraped_data = batch_scrape(rows)
+            got = sum(1 for v in scraped_data.values() if v[0])
+            st.success(f"✅ キャッチコピー取得完了（{got}/{len(scraped_data)}件）")
+
         with st.spinner("書き込み中..."):
             try:
                 service = get_service()
@@ -1074,7 +1232,10 @@ with main_tab:
 
                 # ── データ倉庫に追記 ──────────────────────────
                 if rows:
-                    warehouse_rows = build_warehouse_rows(client_name, rows, master, rules, period_start, period_end)
+                    warehouse_rows = build_warehouse_rows(
+                        client_name, rows, master, rules,
+                        period_start, period_end, scraped=scraped_data
+                    )
                     append_to_warehouse(service, warehouse_rows)
                     st.success(f"✅ データ倉庫に {len(warehouse_rows)}行を追記しました")
 
