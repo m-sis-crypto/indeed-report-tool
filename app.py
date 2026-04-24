@@ -51,8 +51,10 @@ WAREHOUSE_SHEET_NAME     = "データ倉庫"
 CONFIG_SHEET_NAME        = "クライアント設定"
 WAREHOUSE_COLS = [
     "取込日", "クライアント", "店舗", "大カテゴリ", "業態", "エリア", "最寄り駅",
-    "職種", "雇用形態", "集計開始", "集計終了",
+    "職種", "雇用形態", "参照番号", "求人タイトル", "求人URL",
+    "集計開始", "集計終了",
     "表示回数", "クリック数", "応募開始数", "応募数", "費用",
+    "キャッチコピー", "写真説明",
 ]
 
 # 業態の選択肢（大カテゴリ別）
@@ -558,7 +560,9 @@ def ensure_warehouse_sheet(service):
         ).execute()
 
 
-def build_warehouse_rows(client_name, data2, master, period_start, period_end):
+def build_warehouse_rows(client_name, rows_raw, master, rules, period_start, period_end):
+    """1求人1行でデータ倉庫用の行リストを生成する。"""
+    from indeed_report import normalize_store, extract_employment_type, extract_job_title, to_int, to_float
     today = date.today().strftime("%Y/%m/%d")
     store_labels = {
         e["short_name"]: (
@@ -567,24 +571,35 @@ def build_warehouse_rows(client_name, data2, master, period_start, period_end):
         )
         for e in master
     }
-    rows = []
-    for (short_name, emp_type, job_title) in sorted(data2.keys()):
-        d = data2[(short_name, emp_type, job_title)]
+    out = []
+    for row in rows_raw:
+        short_name = normalize_store(row["企業名"], master)
+        if not short_name:
+            continue
+        emp_type  = extract_employment_type(row["求人"], row.get("キャンペーン", ""))
+        job_title = extract_job_title(row["求人"], rules)
         cat, genre, area, station = store_labels.get(short_name, ("", "", "", ""))
-        rows.append([
+        out.append([
             today, client_name, short_name, cat, genre, area, station,
-            job_title, emp_type, period_start, period_end,
-            d["表示回数"], d["クリック数"], d["応募開始数"], d["応募数"],
-            round(d["費用"]),
+            job_title, emp_type,
+            row.get("参照番号", ""),
+            row.get("求人", ""),
+            row.get("求人URL", ""),
+            period_start, period_end,
+            to_int(row["表示回数"]), to_int(row["クリック数"]),
+            to_int(row["応募開始数"]), to_int(row["応募数"]),
+            round(to_float(row["費用"])),
+            "",  # キャッチコピー（Phase 2で実装）
+            "",  # 写真説明（Phase 2で実装）
         ])
-    return rows
+    return out
 
 
 def append_to_warehouse(service, warehouse_rows):
     ensure_warehouse_sheet(service)
     last = get_last_row(service, WAREHOUSE_SPREADSHEET_ID, WAREHOUSE_SHEET_NAME)
     next_row = last + 1
-    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:P{next_row + len(warehouse_rows) - 1}"
+    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:U{next_row + len(warehouse_rows) - 1}"
     service.spreadsheets().values().update(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
         range=range_str,
@@ -1058,8 +1073,8 @@ with main_tab:
                     st.success(f"✅ 不明行 {len(unknown_rows)}行を{label}に追記しました")
 
                 # ── データ倉庫に追記 ──────────────────────────
-                if data2:
-                    warehouse_rows = build_warehouse_rows(client_name, data2, master, period_start, period_end)
+                if rows:
+                    warehouse_rows = build_warehouse_rows(client_name, rows, master, rules, period_start, period_end)
                     append_to_warehouse(service, warehouse_rows)
                     st.success(f"✅ データ倉庫に {len(warehouse_rows)}行を追記しました")
 
