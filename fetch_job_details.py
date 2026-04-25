@@ -133,21 +133,12 @@ def scrape_with_playwright(url: str) -> tuple:
                 print("  ⚠️  Indeedのセキュリティチェックが表示されました。手動で突破してください。")
                 page.wait_for_timeout(15000)  # 15秒待機（手動操作の時間）
 
-            # キャッチコピーを探す（JobDescriptionの先頭テキストを使用）
-            jd = page.query_selector("[class*='JobDescription']")
-            if jd:
-                full_text = (jd.inner_text() or "").strip()
-                # 「《本求人のポイント》」などのポイントセクションがあればそこ以降を抽出
-                import re
-                point_match = re.search(r'[《【].*?ポイント.*?[》】]\s*\n?([\s\S]{20,})', full_text)
-                if point_match:
-                    catchphrase = point_match.group(1).strip()[:300]
-                else:
-                    # なければ先頭300文字（「募集要項」「仕事内容」などヘッダーを除く）
-                    lines = [l.strip() for l in full_text.splitlines() if l.strip() and len(l.strip()) > 5]
-                    # 短いヘッダー行（10文字以下）をスキップ
-                    body_lines = [l for l in lines if len(l) > 10]
-                    catchphrase = "\n".join(body_lines[:5])[:300]
+            # キャッチコピーを探す（JapanJobSubtitle-text が本物のキャッチコピー）
+            subtitle_el = page.query_selector("[class*='JapanJobSubtitle-text']")
+            if subtitle_el:
+                text = (subtitle_el.inner_text() or "").strip()
+                if len(text) >= 10:
+                    catchphrase = text[:500]
 
             # 写真URLを探す
             for sel in PHOTO_SELECTORS:
