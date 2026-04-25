@@ -22,5 +22,11 @@
     "spreadsheet_id": "1MgJgRi53M_JijGZW0UGo2kp3kzBa03y2L7e6AKLF1S0",
     "sheet_pattern1": "めぐテスト",
     "sheet_pattern2": "めぐテスト（詳細）"
+  },
+  "OTTO": {
+    "master_path": "masters/otto.csv",
+    "spreadsheet_id": "1abtNITiIExQR61HjoTlfFOU8MYdfCZzK6zgPJO2R7Ec",
+    "sheet_pattern1": "レポート抽出",
+    "sheet_pattern2": "レポート抽出_詳細"
   }
 }
