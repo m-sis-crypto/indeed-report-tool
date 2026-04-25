@@ -47,22 +47,9 @@ COL_TITLE       = 10   # K列: 求人タイトル
 COL_CATCHPHRASE = 19   # T列: キャッチコピー
 COL_PHOTO_DESC  = 20   # U列: 写真説明
 
-# キャッチコピー候補セレクタ（優先度順）
-CATCHPHRASE_SELECTORS = [
-    "[data-testid='pr-text']",
-    "[data-testid='prText']",
-    "[class*='prText']",
-    "[class*='pr-text']",
-    "[class*='prDescription']",
-    "[class*='PrDescription']",
-    "[class*='pr_description']",
-    # 求人説明文の先頭段落（代替）
-    "[data-testid='jobDescriptionText'] > p:first-of-type",
-    "#jobDescriptionText > p:first-of-type",
-]
-
 # 写真候補セレクタ（優先度順）
 PHOTO_SELECTORS = [
+    "[data-testid='ipl-carousel-items-container'] img",  # カルーセル（モバイル版）
     "[class*='jobPhoto'] img",
     "[class*='companyPhoto'] img",
     "[class*='heroImage'] img",
@@ -146,14 +133,21 @@ def scrape_with_playwright(url: str) -> tuple:
                 print("  ⚠️  Indeedのセキュリティチェックが表示されました。手動で突破してください。")
                 page.wait_for_timeout(15000)  # 15秒待機（手動操作の時間）
 
-            # キャッチコピーを探す
-            for sel in CATCHPHRASE_SELECTORS:
-                el = page.query_selector(sel)
-                if el:
-                    text = (el.inner_text() or "").strip()
-                    if len(text) >= 20:
-                        catchphrase = text[:500]
-                        break
+            # キャッチコピーを探す（JobDescriptionの先頭テキストを使用）
+            jd = page.query_selector("[class*='JobDescription']")
+            if jd:
+                full_text = (jd.inner_text() or "").strip()
+                # 「《本求人のポイント》」などのポイントセクションがあればそこ以降を抽出
+                import re
+                point_match = re.search(r'[《【].*?ポイント.*?[》】]\s*\n?([\s\S]{20,})', full_text)
+                if point_match:
+                    catchphrase = point_match.group(1).strip()[:300]
+                else:
+                    # なければ先頭300文字（「募集要項」「仕事内容」などヘッダーを除く）
+                    lines = [l.strip() for l in full_text.splitlines() if l.strip() and len(l.strip()) > 5]
+                    # 短いヘッダー行（10文字以下）をスキップ
+                    body_lines = [l for l in lines if len(l) > 10]
+                    catchphrase = "\n".join(body_lines[:5])[:300]
 
             # 写真URLを探す
             for sel in PHOTO_SELECTORS:
