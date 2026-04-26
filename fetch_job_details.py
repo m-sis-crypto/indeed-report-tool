@@ -45,6 +45,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # 列インデックス（0始まり・ヘッダー行除く）
 COL_CLIENT      = 1    # B列: クライアント
 COL_STORE       = 2    # C列: 店舗（正規化名）
+COL_AREA        = 5    # F列: エリア
 COL_STATION     = 6    # G列: 最寄り駅
 COL_URL         = 11   # L列: 求人URL
 COL_TITLE       = 10   # K列: 求人タイトル
@@ -82,8 +83,8 @@ def read_warehouse(service):
     return result.get("values", [])
 
 
-def update_cells(service, sheet_row: int, catchphrase: str, photo_desc: str, salary: str = "", station: str = ""):
-    """G列（最寄り駅）・T列（キャッチコピー）・U列（写真説明）・V列（給与）を更新する。sheet_rowは1始まり。"""
+def update_cells(service, sheet_row: int, catchphrase: str, photo_desc: str, salary: str = "", station: str = "", area: str = ""):
+    """F列（エリア）・G列（最寄り駅）・T列（キャッチコピー）・U列（写真説明）・V列（給与）を更新する。sheet_rowは1始まり。"""
     data = [
         {"range": f"'{WAREHOUSE_SHEET_NAME}'!T{sheet_row}", "values": [[catchphrase]]},
         {"range": f"'{WAREHOUSE_SHEET_NAME}'!U{sheet_row}", "values": [[photo_desc]]},
@@ -91,48 +92,53 @@ def update_cells(service, sheet_row: int, catchphrase: str, photo_desc: str, sal
     ]
     if station:
         data.append({"range": f"'{WAREHOUSE_SHEET_NAME}'!G{sheet_row}", "values": [[station]]})
+    if area:
+        data.append({"range": f"'{WAREHOUSE_SHEET_NAME}'!F{sheet_row}", "values": [[area]]})
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
         body={"valueInputOption": "RAW", "data": data},
     ).execute()
 
 
-def update_master_stations(service, master_updates: dict):
-    """マスターシートの最寄り駅列を一括更新する。
-    master_updates: {client_name: {store_name: station}}
+def update_master_location(service, master_updates: dict):
+    """マスターシートのエリア・最寄り駅列を一括更新する。
+    master_updates: {client_name: {store_name: {"station": str, "area": str}}}
     """
     for client_name, store_map in master_updates.items():
         sheet_name = f"マスター_{client_name}"
         try:
             result = service.spreadsheets().values().get(
                 spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
-                range=f"'{sheet_name}'!A:E",
+                range=f"'{sheet_name}'!A:G",
             ).execute()
             rows = result.get("values", [])
             if len(rows) < 2:
                 continue
-            # ヘッダー行でE列（最寄り駅）のインデックスを確認
             header = rows[0]
-            station_col_idx = next(
-                (i for i, h in enumerate(header) if "最寄り駅" in h), len(header)
-            )
+            area_col_idx    = next((i for i, h in enumerate(header) if h in ("area", "エリア")), None)
+            station_col_idx = next((i for i, h in enumerate(header) if h in ("nearest_station", "最寄り駅")), None)
             updates = []
-            for row_idx, row in enumerate(rows[1:], start=2):  # 2始まり（ヘッダー除く）
-                store_name = row[1] if len(row) > 1 else ""  # B列=正規化名
-                if store_name in store_map:
-                    current_station = row[station_col_idx] if len(row) > station_col_idx else ""
-                    if not current_station:
-                        col_letter = chr(ord('A') + station_col_idx)
-                        updates.append({
-                            "range": f"'{sheet_name}'!{col_letter}{row_idx}",
-                            "values": [[store_map[store_name]]],
-                        })
+            for row_idx, row in enumerate(rows[1:], start=2):
+                store_name = row[1] if len(row) > 1 else ""  # B列=正規化名(short_name)
+                if store_name not in store_map:
+                    continue
+                info = store_map[store_name]
+                if station_col_idx is not None:
+                    current = row[station_col_idx] if len(row) > station_col_idx else ""
+                    if not current and info.get("station"):
+                        col = chr(ord('A') + station_col_idx)
+                        updates.append({"range": f"'{sheet_name}'!{col}{row_idx}", "values": [[info["station"]]]})
+                if area_col_idx is not None:
+                    current = row[area_col_idx] if len(row) > area_col_idx else ""
+                    if not current and info.get("area"):
+                        col = chr(ord('A') + area_col_idx)
+                        updates.append({"range": f"'{sheet_name}'!{col}{row_idx}", "values": [[info["area"]]]})
             if updates:
                 service.spreadsheets().values().batchUpdate(
                     spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
                     body={"valueInputOption": "RAW", "data": updates},
                 ).execute()
-                print(f"  📋 マスター「{sheet_name}」: {len(updates)}件の最寄り駅を更新しました")
+                print(f"  📋 マスター「{sheet_name}」: {len(updates)}セルを更新しました")
         except Exception as e:
             print(f"  ⚠️  マスター「{sheet_name}」更新エラー: {e}")
 
@@ -155,6 +161,7 @@ def scrape_with_playwright(url: str) -> tuple:
     photo_url = ""
     salary = ""
     station = ""
+    area = ""
 
     try:
         with sync_playwright() as p:
@@ -186,12 +193,14 @@ def scrape_with_playwright(url: str) -> tuple:
                 if len(text) >= 10:
                     catchphrase = text[:500]
 
-            # 給与を探す（e1wnkr790クラスの中で「円」を含む要素）
+            # 給与・エリアを探す（e1wnkr790クラス）
             for el in page.query_selector_all("[class*='e1wnkr790']"):
                 text = (el.inner_text() or "").strip()
-                if "円" in text and len(text) < 60:
+                if not salary and "円" in text and len(text) < 60:
                     salary = text
-                    break
+                if not area and "駅" in text and "円" not in text and len(text) < 30:
+                    # "東京都 港区 六本木駅" → "東京都港区六本木駅"（スペース除去）
+                    area = text.replace(" ", "").replace("　", "")
 
             # 最寄り駅を探す：「アクセス」セクションの最初のliから抽出
             for section in page.query_selector_all("[class*='JobDescriptionBlockSection']"):
@@ -219,7 +228,7 @@ def scrape_with_playwright(url: str) -> tuple:
     except Exception as e:
         print(f"  ⚠️  Playwright エラー: {e}")
 
-    return catchphrase, photo_url, salary, station
+    return catchphrase, photo_url, salary, station, area
 
 
 # ============================================================
@@ -285,17 +294,17 @@ def main():
     data_rows = all_values[1:]
     print(f"  総行数: {len(data_rows)}件")
 
-    # 求人URLがあってキャッチコピーまたは最寄り駅が空の行を抽出
+    # 求人URLがあってキャッチコピー・最寄り駅・エリアのいずれかが空の行を抽出
     targets = []
     for i, row in enumerate(data_rows):
-        url = row[COL_URL] if len(row) > COL_URL else ""
+        url        = row[COL_URL]         if len(row) > COL_URL         else ""
         catchphrase = row[COL_CATCHPHRASE] if len(row) > COL_CATCHPHRASE else ""
-        station = row[COL_STATION] if len(row) > COL_STATION else ""
-        # URLがhttpで始まる行のみ対象（古い形式の表示回数等を除外）
-        if url and url.startswith("http") and (not catchphrase or not station):
-            targets.append((i + 2, row))  # sheet_row（1始まり + ヘッダー行）
+        station    = row[COL_STATION]     if len(row) > COL_STATION     else ""
+        area       = row[COL_AREA]        if len(row) > COL_AREA        else ""
+        if url and url.startswith("http") and (not catchphrase or not station or not area):
+            targets.append((i + 2, row))
 
-    print(f"  取得対象（URLあり・キャッチコピーor最寄り駅空）: {len(targets)}件\n")
+    print(f"  取得対象（URLあり・キャッチコピー/最寄り駅/エリアいずれか空）: {len(targets)}件\n")
 
     if not targets:
         print("✅ 取得が必要な行はありません")
@@ -306,29 +315,33 @@ def main():
 
     for idx, (sheet_row, row) in enumerate(targets):
         url    = row[COL_URL]
-        title  = row[COL_TITLE] if len(row) > COL_TITLE else ""
+        title  = row[COL_TITLE]  if len(row) > COL_TITLE  else ""
         client = row[COL_CLIENT] if len(row) > COL_CLIENT else ""
-        store  = row[COL_STORE] if len(row) > COL_STORE else ""
+        store  = row[COL_STORE]  if len(row) > COL_STORE  else ""
         existing_station = row[COL_STATION] if len(row) > COL_STATION else ""
+        existing_area    = row[COL_AREA]    if len(row) > COL_AREA    else ""
         print(f"[{idx+1}/{len(targets)}] {title[:40]}")
         print(f"  {url[:70]}")
 
-        catchphrase, photo_url, salary, station = scrape_with_playwright(url)
-        # すでに最寄り駅が入っている行は上書きしない
+        catchphrase, photo_url, salary, station, area = scrape_with_playwright(url)
+        # すでに値が入っている列は上書きしない
         if existing_station:
             station = ""
+        if existing_area:
+            area = ""
         photo_desc = describe_photo(photo_url) if photo_url else ""
 
         print(f"  キャッチコピー: {catchphrase[:60] if catchphrase else '（取得できず）'}")
         print(f"  写真説明: {photo_desc if photo_desc else '（取得できず）'}")
         print(f"  給与: {salary if salary else '（取得できず）'}")
         print(f"  最寄り駅: {station if station else '（取得できず）'}")
+        print(f"  エリア: {area if area else '（取得できず）'}")
 
-        if catchphrase or photo_desc or salary or station:
-            update_cells(service, sheet_row, catchphrase, photo_desc, salary, station)
+        if catchphrase or photo_desc or salary or station or area:
+            update_cells(service, sheet_row, catchphrase, photo_desc, salary, station, area)
             success_count += 1
-            if station and client and store:
-                master_updates[client][store] = station
+            if (station or area) and client and store:
+                master_updates[client][store] = {"station": station, "area": area}
             print("  → 倉庫に書き込みました ✅")
         else:
             print("  → スキップ（取得できなかったため書き込まず）")
@@ -337,10 +350,10 @@ def main():
         if idx < len(targets) - 1:
             time.sleep(3)
 
-    # マスターシートにも最寄り駅を反映
+    # マスターシートにもエリア・最寄り駅を反映
     if master_updates:
-        print(f"\n📋 マスターシートに最寄り駅を反映中...")
-        update_master_stations(service, master_updates)
+        print(f"\n📋 マスターシートにエリア・最寄り駅を反映中...")
+        update_master_location(service, master_updates)
 
     print(f"\n{'=' * 60}")
     print(f"✅ 完了: {success_count}/{len(targets)} 件を更新しました")

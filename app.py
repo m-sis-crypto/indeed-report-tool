@@ -880,12 +880,12 @@ with settings_tab:
                         "業態", width="medium",
                         options=GENRE_OPTIONS,
                     ),
-                    "エリア":                st.column_config.TextColumn("エリア（例：新宿・渋谷・銀座）", width="medium"),
-                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（例：新宿駅）", width="medium"),
+                    "エリア":                st.column_config.TextColumn("エリア（自動取得）", width="medium", disabled=True),
+                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（自動取得）", width="medium", disabled=True),
                     "キーワード（カンマ区切り）": st.column_config.TextColumn("マッチキーワード（カンマ区切り）", width="large"),
                 },
             )
-            st.caption("💡 大カテゴリ・業態・エリア・最寄り駅はデータ倉庫の分析に使われます。設定はGoogle Sheetsに保存されるため再起動後も維持されます。")
+            st.caption("💡 大カテゴリ・業態はここで入力。エリア・最寄り駅はfetch_job_details.pyで自動取得されます。")
 
             if st.button("💾 マスターを保存", key="save_master"):
                 save_master_df(edited_master_df, m_path, sel_client)
@@ -899,10 +899,9 @@ with settings_tab:
                     st.caption("最寄り駅はデータ倉庫の分析に必要な情報です。下のリンクでGoogleマップを開き、確認してから上の表に入力・保存してください。")
                     for _, _row in _missing_station.iterrows():
                         _name = str(_row["正規化名"]).strip() or str(_row["Indeed企業名"]).strip()
-                        _area = str(_row.get("エリア", "")).strip()
-                        _query = urllib.parse.quote(f"{_name} {_area}".strip())
+                        _query = urllib.parse.quote(_name)
                         _maps_url = f"https://www.google.com/maps/search/{_query}"
-                        st.markdown(f"- **{_name}**（{_area}） → [Googleマップで検索]({_maps_url})")
+                        st.markdown(f"- **{_name}** → [Googleマップで検索]({_maps_url})")
 
             st.divider()
             st.subheader("CSVからインポート")
@@ -977,23 +976,13 @@ with settings_tab:
 
                         st.info(f"企業名 {len(unique_names)}社中、未登録: **{len(new_names)}社**")
 
-                        # 市区町村列からエリアを企業名ごとに取得（最初の出現値）
-                        area_map = {}
-                        if "市区町村" in df_indeed.columns:
-                            area_map = (
-                                df_indeed.dropna(subset=["企業名", "市区町村"])
-                                .groupby("企業名")["市区町村"]
-                                .first()
-                                .to_dict()
-                            )
-
                         if new_names:
                             df_new = pd.DataFrame({
                                 "Indeed企業名":              new_names,
                                 "正規化名":                  ["" for _ in new_names],
                                 "大カテゴリ":                ["" for _ in new_names],
                                 "業態":                      ["" for _ in new_names],
-                                "エリア":                    [area_map.get(n, "") for n in new_names],
+                                "エリア":                    ["" for _ in new_names],
                                 "最寄り駅":                  ["" for _ in new_names],
                                 "キーワード（カンマ区切り）": [n for n in new_names],
                             })
@@ -1029,8 +1018,8 @@ with settings_tab:
                                         "業態", width="medium",
                                         options=GENRE_OPTIONS,
                                     ),
-                                    "エリア":                st.column_config.TextColumn("エリア（例：新宿・渋谷）", width="medium"),
-                                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（例：新宿駅）", width="medium"),
+                                    "エリア":                st.column_config.TextColumn("エリア（自動取得）", width="medium", disabled=True),
+                                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（自動取得）", width="medium", disabled=True),
                                     "キーワード（カンマ区切り）": st.column_config.TextColumn("キーワード（カンマ区切り）", width="large"),
                                 },
                             )
@@ -1043,10 +1032,9 @@ with settings_tab:
                                     st.caption("最寄り駅はデータ倉庫の分析に必要です。下のリンクでGoogleマップを開いて確認してから、上の表の「最寄り駅」列に入力してください。")
                                     for _, _row in _no_station.iterrows():
                                         _name = str(_row["正規化名"]).strip() or str(_row["Indeed企業名"]).strip()
-                                        _area = str(_row.get("エリア", "")).strip()
-                                        _query = urllib.parse.quote(f"{_name} {_area}".strip())
+                                        _query = urllib.parse.quote(_name)
                                         _maps_url = f"https://www.google.com/maps/search/{_query}"
-                                        st.markdown(f"- **{_name}**（{_area}） → [Googleマップで検索]({_maps_url})")
+                                        st.markdown(f"- **{_name}** → [Googleマップで検索]({_maps_url})")
 
                             if st.button("💾 マスターに追加", key="master_from_indeed"):
                                 to_add = edited_new[edited_new["正規化名"].str.strip() != ""]
