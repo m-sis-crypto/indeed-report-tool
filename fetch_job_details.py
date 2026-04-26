@@ -46,6 +46,7 @@ COL_URL         = 11   # L列: 求人URL
 COL_TITLE       = 10   # K列: 求人タイトル
 COL_CATCHPHRASE = 19   # T列: キャッチコピー
 COL_PHOTO_DESC  = 20   # U列: 写真説明
+COL_SALARY      = 21   # V列: 給与
 
 # 写真候補セレクタ（優先度順）
 PHOTO_SELECTORS = [
@@ -77,17 +78,16 @@ def read_warehouse(service):
     return result.get("values", [])
 
 
-def update_cells(service, sheet_row: int, catchphrase: str, photo_desc: str):
-    """T列（キャッチコピー）とU列（写真説明）を更新する。sheet_rowは1始まり。"""
-    t_col = "T"
-    u_col = "U"
+def update_cells(service, sheet_row: int, catchphrase: str, photo_desc: str, salary: str = ""):
+    """T列（キャッチコピー）・U列（写真説明）・V列（給与）を更新する。sheet_rowは1始まり。"""
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
         body={
             "valueInputOption": "RAW",
             "data": [
-                {"range": f"'{WAREHOUSE_SHEET_NAME}'!{t_col}{sheet_row}", "values": [[catchphrase]]},
-                {"range": f"'{WAREHOUSE_SHEET_NAME}'!{u_col}{sheet_row}", "values": [[photo_desc]]},
+                {"range": f"'{WAREHOUSE_SHEET_NAME}'!T{sheet_row}", "values": [[catchphrase]]},
+                {"range": f"'{WAREHOUSE_SHEET_NAME}'!U{sheet_row}", "values": [[photo_desc]]},
+                {"range": f"'{WAREHOUSE_SHEET_NAME}'!V{sheet_row}", "values": [[salary]]},
             ],
         },
     ).execute()
@@ -109,6 +109,7 @@ def scrape_with_playwright(url: str) -> tuple:
 
     catchphrase = ""
     photo_url = ""
+    salary = ""
 
     try:
         with sync_playwright() as p:
@@ -140,6 +141,13 @@ def scrape_with_playwright(url: str) -> tuple:
                 if len(text) >= 10:
                     catchphrase = text[:500]
 
+            # 給与を探す（e1wnkr790クラスの中で「円」を含む要素）
+            for el in page.query_selector_all("[class*='e1wnkr790']"):
+                text = (el.inner_text() or "").strip()
+                if "円" in text and len(text) < 60:
+                    salary = text
+                    break
+
             # 写真URLを探す
             for sel in PHOTO_SELECTORS:
                 img = page.query_selector(sel)
@@ -154,7 +162,7 @@ def scrape_with_playwright(url: str) -> tuple:
     except Exception as e:
         print(f"  ⚠️  Playwright エラー: {e}")
 
-    return catchphrase, photo_url
+    return catchphrase, photo_url, salary
 
 
 # ============================================================
@@ -242,14 +250,15 @@ def main():
         print(f"[{idx+1}/{len(targets)}] {title[:40]}")
         print(f"  {url[:70]}")
 
-        catchphrase, photo_url = scrape_with_playwright(url)
+        catchphrase, photo_url, salary = scrape_with_playwright(url)
         photo_desc = describe_photo(photo_url) if photo_url else ""
 
         print(f"  キャッチコピー: {catchphrase[:60] if catchphrase else '（取得できず）'}")
         print(f"  写真説明: {photo_desc if photo_desc else '（取得できず）'}")
+        print(f"  給与: {salary if salary else '（取得できず）'}")
 
-        if catchphrase or photo_desc:
-            update_cells(service, sheet_row, catchphrase, photo_desc)
+        if catchphrase or photo_desc or salary:
+            update_cells(service, sheet_row, catchphrase, photo_desc, salary)
             success_count += 1
             print("  → 倉庫に書き込みました ✅")
         else:

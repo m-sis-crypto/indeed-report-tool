@@ -54,7 +54,7 @@ WAREHOUSE_COLS = [
     "職種", "雇用形態", "参照番号", "求人タイトル", "求人URL",
     "集計開始", "集計終了",
     "表示回数", "クリック数", "応募開始数", "応募数", "費用",
-    "キャッチコピー", "写真説明",
+    "キャッチコピー", "写真説明", "給与",
 ]
 
 # 業態の選択肢（大カテゴリ別）
@@ -744,7 +744,7 @@ def append_to_warehouse(service, warehouse_rows):
     ensure_warehouse_sheet(service)
     last = get_last_row(service, WAREHOUSE_SPREADSHEET_ID, WAREHOUSE_SHEET_NAME)
     next_row = last + 1
-    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:U{next_row + len(warehouse_rows) - 1}"
+    range_str = f"'{WAREHOUSE_SHEET_NAME}'!A{next_row}:V{next_row + len(warehouse_rows) - 1}"
     service.spreadsheets().values().update(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
         range=range_str,
