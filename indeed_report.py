@@ -358,8 +358,34 @@ def build_rows_unknown(rows, master, period_start, period_end, rules=None):
     return result
 
 
+def ensure_sheet_rows(service, sheet_name, required_row):
+    """シートの行数が足りない場合に末尾へ行を追加する"""
+    spreadsheet = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    sheet_id_num = None
+    current_rows = 0
+    for sheet in spreadsheet['sheets']:
+        if sheet['properties']['title'] == sheet_name:
+            sheet_id_num = sheet['properties']['sheetId']
+            current_rows = sheet['properties']['gridProperties']['rowCount']
+            break
+    if sheet_id_num is None or current_rows >= required_row:
+        return
+    append_count = required_row - current_rows + 50  # 少し余裕を持たせる
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={'requests': [{
+            'appendDimension': {
+                'sheetId': sheet_id_num,
+                'dimension': 'ROWS',
+                'length': append_count,
+            }
+        }]}
+    ).execute()
+
+
 def append_to_sheet(service, rows, next_row, sheet_name):
     """指定行から追記（既存データを壊さない）"""
+    ensure_sheet_rows(service, sheet_name, next_row + len(rows) - 1)
     range_str = f"'{sheet_name}'!A{next_row}:K{next_row + len(rows) - 1}"
     service.spreadsheets().values().update(
         spreadsheetId=SPREADSHEET_ID,
