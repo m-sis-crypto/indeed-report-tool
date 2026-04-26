@@ -78,7 +78,7 @@ def get_service():
 def read_warehouse(service):
     result = service.spreadsheets().values().get(
         spreadsheetId=WAREHOUSE_SPREADSHEET_ID,
-        range=f"'{WAREHOUSE_SHEET_NAME}'!A:U",
+        range=f"'{WAREHOUSE_SHEET_NAME}'!A:V",
     ).execute()
     return result.get("values", [])
 
@@ -193,25 +193,51 @@ def scrape_with_playwright(url: str) -> tuple:
                 if len(text) >= 10:
                     catchphrase = text[:500]
 
-            # 給与・エリアを探す（e1wnkr790クラス）
+            # 給与を探す（e1wnkr790クラス）
             for el in page.query_selector_all("[class*='e1wnkr790']"):
                 text = (el.inner_text() or "").strip()
                 if not salary and "円" in text and len(text) < 60:
                     salary = text
-                if not area and "駅" in text and "円" not in text and len(text) < 30:
-                    # "東京都 港区 六本木駅" → "東京都港区六本木駅"（スペース除去）
-                    area = text.replace(" ", "").replace("　", "")
 
-            # 最寄り駅を探す：「アクセス」セクションの最初のliから抽出
+            # エリア①：「勤務地所在地」セクション（最優先）
+            # エリア②：「勤務地」セクション（フォールバック）
+            # どちらも都道府県から始まる行を住所として抽出する
+            PREFECTURES = (
+                '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+                '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+                '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
+                '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
+                '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+                '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
+                '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+            )
+            for target_header in ("勤務地所在地", "勤務地"):
+                if area:
+                    break
+                for section in page.query_selector_all("[class*='JobDescriptionBlockSection']"):
+                    header = section.query_selector("[class*='JobDescriptionBlockSection-headerText']")
+                    if header and (header.inner_text() or "").strip() == target_header:
+                        full = (section.inner_text() or "").strip()
+                        for line in full.split("\n"):
+                            line = line.strip()
+                            if any(line.startswith(pref) for pref in PREFECTURES):
+                                area = line
+                                break
+                        break
+
+            # 最寄り駅：「アクセス」セクション内の「駅名」徒歩X分 で徒歩最小を選ぶ
             for section in page.query_selector_all("[class*='JobDescriptionBlockSection']"):
                 header = section.query_selector("[class*='JobDescriptionBlockSection-headerText']")
                 if header and (header.inner_text() or "").strip() == "アクセス":
-                    first_li = section.query_selector("li")
-                    if first_li:
-                        li_text = (first_li.inner_text() or "").strip()
-                        m = re.search(r'「(\S+駅)」', li_text)
+                    candidates = []
+                    for li in section.query_selector_all("li"):
+                        li_text = (li.inner_text() or "").strip()
+                        m = re.search(r'「(\S+駅)」.*?徒歩(\d+)分', li_text)
                         if m:
-                            station = m.group(1)
+                            candidates.append((int(m.group(2)), m.group(1)))
+                    if candidates:
+                        candidates.sort(key=lambda x: x[0])
+                        station = candidates[0][1]
                     break
 
             # 写真URLを探す
