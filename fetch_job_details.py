@@ -294,17 +294,27 @@ def main():
     data_rows = all_values[1:]
     print(f"  総行数: {len(data_rows)}件")
 
-    # 求人URLがあってキャッチコピー・最寄り駅・エリアのいずれかが空の行を抽出
+    # 求人URLがあってキャッチコピーが空 OR エリア・最寄り駅は常に再取得（古い手動値を上書き）
     targets = []
     for i, row in enumerate(data_rows):
-        url        = row[COL_URL]         if len(row) > COL_URL         else ""
+        url         = row[COL_URL]         if len(row) > COL_URL         else ""
         catchphrase = row[COL_CATCHPHRASE] if len(row) > COL_CATCHPHRASE else ""
-        station    = row[COL_STATION]     if len(row) > COL_STATION     else ""
-        area       = row[COL_AREA]        if len(row) > COL_AREA        else ""
-        if url and url.startswith("http") and (not catchphrase or not station or not area):
+        if url and url.startswith("http") and not catchphrase:
             targets.append((i + 2, row))
 
-    print(f"  取得対象（URLあり・キャッチコピー/最寄り駅/エリアいずれか空）: {len(targets)}件\n")
+    # エリア・最寄り駅が未取得の行も追加（キャッチコピー済みでもエリアが空ならスクレイプ）
+    target_rows_set = {sheet_row for sheet_row, _ in targets}
+    for i, row in enumerate(data_rows):
+        sheet_row = i + 2
+        if sheet_row in target_rows_set:
+            continue
+        url     = row[COL_URL]     if len(row) > COL_URL     else ""
+        station = row[COL_STATION] if len(row) > COL_STATION else ""
+        area    = row[COL_AREA]    if len(row) > COL_AREA    else ""
+        if url and url.startswith("http") and (not station or not area):
+            targets.append((sheet_row, row))
+
+    print(f"  取得対象（キャッチコピー空 or エリア/最寄り駅空）: {len(targets)}件\n")
 
     if not targets:
         print("✅ 取得が必要な行はありません")
@@ -324,11 +334,8 @@ def main():
         print(f"  {url[:70]}")
 
         catchphrase, photo_url, salary, station, area = scrape_with_playwright(url)
-        # すでに値が入っている列は上書きしない
-        if existing_station:
-            station = ""
-        if existing_area:
-            area = ""
+        # キャッチコピー・写真説明・給与はすでに値があれば上書きしない
+        # エリア・最寄り駅は自動取得で常に上書き（以前の手動入力値を正しい値に更新）
         photo_desc = describe_photo(photo_url) if photo_url else ""
 
         print(f"  キャッチコピー: {catchphrase[:60] if catchphrase else '（取得できず）'}")
