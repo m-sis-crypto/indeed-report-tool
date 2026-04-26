@@ -880,28 +880,17 @@ with settings_tab:
                         "業態", width="medium",
                         options=GENRE_OPTIONS,
                     ),
-                    "エリア":                st.column_config.TextColumn("エリア（自動取得）", width="medium", disabled=True),
-                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（自動取得）", width="medium", disabled=True),
+                    "エリア":                None,
+                    "最寄り駅":              None,
                     "キーワード（カンマ区切り）": st.column_config.TextColumn("マッチキーワード（カンマ区切り）", width="large"),
                 },
             )
-            st.caption("💡 大カテゴリ・業態はここで入力。エリア・最寄り駅はfetch_job_details.pyで自動取得されます。")
+            st.caption("💡 大カテゴリ・業態はここで入力。エリア・最寄り駅はfetch_job_details.pyで自動取得されます（表示非対象）。")
 
             if st.button("💾 マスターを保存", key="save_master"):
                 save_master_df(edited_master_df, m_path, sel_client)
                 st.success(f"✅ {sel_client} のマスターを保存しました（Google Sheetsに同期済み）")
                 st.rerun()
-
-            # 最寄り駅 未入力チェック（同じキャッシュを使う・APIコールなし）
-            _missing_station = _loaded_master_df[_loaded_master_df["最寄り駅"].fillna("").str.strip() == ""]
-            if not _missing_station.empty:
-                with st.expander(f"🗺️ 最寄り駅が未入力の店舗 {len(_missing_station)}件 ── Googleマップで確認して入力してください"):
-                    st.caption("最寄り駅はデータ倉庫の分析に必要な情報です。下のリンクでGoogleマップを開き、確認してから上の表に入力・保存してください。")
-                    for _, _row in _missing_station.iterrows():
-                        _name = str(_row["正規化名"]).strip() or str(_row["Indeed企業名"]).strip()
-                        _query = urllib.parse.quote(_name)
-                        _maps_url = f"https://www.google.com/maps/search/{_query}"
-                        st.markdown(f"- **{_name}** → [Googleマップで検索]({_maps_url})")
 
             st.divider()
             st.subheader("CSVからインポート")
@@ -1018,23 +1007,12 @@ with settings_tab:
                                         "業態", width="medium",
                                         options=GENRE_OPTIONS,
                                     ),
-                                    "エリア":                st.column_config.TextColumn("エリア（自動取得）", width="medium", disabled=True),
-                                    "最寄り駅":              st.column_config.TextColumn("最寄り駅（自動取得）", width="medium", disabled=True),
+                                    "エリア":                None,
+                                    "最寄り駅":              None,
                                     "キーワード（カンマ区切り）": st.column_config.TextColumn("キーワード（カンマ区切り）", width="large"),
                                 },
                             )
                             st.caption("正規化名を入力してから保存してください。空白の行は保存されません。")
-
-                            # 最寄り駅が空の行のGoogleマップリンクを事前表示
-                            _no_station = df_new[df_new["最寄り駅"].fillna("").str.strip() == ""]
-                            if not _no_station.empty:
-                                with st.expander(f"🗺️ 最寄り駅が未入力の店舗 {len(_no_station)}件 ── 保存前にGoogleマップで確認できます"):
-                                    st.caption("最寄り駅はデータ倉庫の分析に必要です。下のリンクでGoogleマップを開いて確認してから、上の表の「最寄り駅」列に入力してください。")
-                                    for _, _row in _no_station.iterrows():
-                                        _name = str(_row["正規化名"]).strip() or str(_row["Indeed企業名"]).strip()
-                                        _query = urllib.parse.quote(_name)
-                                        _maps_url = f"https://www.google.com/maps/search/{_query}"
-                                        st.markdown(f"- **{_name}** → [Googleマップで検索]({_maps_url})")
 
                             if st.button("💾 マスターに追加", key="master_from_indeed"):
                                 to_add = edited_new[edited_new["正規化名"].str.strip() != ""]
@@ -1043,10 +1021,7 @@ with settings_tab:
                                 else:
                                     merged = pd.concat([existing, to_add], ignore_index=True).drop_duplicates(subset=["Indeed企業名"])
                                     save_master_df(merged, m_path, sel_client)
-                                    _saved_no_station = to_add[to_add["最寄り駅"].fillna("").str.strip() == ""]
                                     st.success(f"✅ {len(to_add)}社を追加しました（計{len(merged)}件）")
-                                    if not _saved_no_station.empty:
-                                        st.warning(f"⚠️ {len(_saved_no_station)}社の最寄り駅が未入力です。設定タブの「🗂 店舗マスター」から後で追加できます。")
                                     st.rerun()
                         else:
                             st.success("✅ すべての企業名が既にマスターに登録されています")
@@ -1154,20 +1129,6 @@ with main_tab:
     if not (sheet_rows1 or sheet_rows2 or unknown_rows):
         st.warning("書き込めるデータがありません。クライアントのマスターCSVを確認してください。")
         st.stop()
-
-    # 最寄り駅 未入力の店舗があれば警告（書き込みはブロックしない）
-    _stores_in_data = {e["short_name"] for e in master}
-    _missing_station_write = master_df[
-        master_df["正規化名"].isin(_stores_in_data) &
-        (master_df["最寄り駅"].fillna("").str.strip() == "")
-    ]
-    if not _missing_station_write.empty:
-        _missing_names = "、".join(_missing_station_write["正規化名"].tolist())
-        st.warning(
-            f"⚠️ **最寄り駅が未入力の店舗があります（{len(_missing_station_write)}件）**: {_missing_names}\n\n"
-            "このまま書き込めますが、データ倉庫に最寄り駅が記録されません。"
-            "「⚙️ 設定 → 🗂 店舗マスター」から後で入力できます。"
-        )
 
     with st.expander("🔍 キャッチコピー・写真取得（実験的機能）"):
         st.caption(
