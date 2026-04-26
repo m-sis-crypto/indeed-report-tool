@@ -186,15 +186,24 @@ def scrape_with_playwright(url: str) -> tuple:
                 if len(text) >= 10:
                     catchphrase = text[:500]
 
-            # 給与・最寄り駅を探す（e1wnkr790クラスの中で「円」「駅」を含む要素）
+            # 給与を探す（e1wnkr790クラスの中で「円」を含む要素）
             for el in page.query_selector_all("[class*='e1wnkr790']"):
                 text = (el.inner_text() or "").strip()
-                if not salary and "円" in text and len(text) < 60:
+                if "円" in text and len(text) < 60:
                     salary = text
-                if not station and "駅" in text and "円" not in text and len(text) < 30:
-                    m = re.search(r'(\S+駅)', text)
-                    if m:
-                        station = m.group(1)
+                    break
+
+            # 最寄り駅を探す：「アクセス」セクションの最初のliから抽出
+            for section in page.query_selector_all("[class*='JobDescriptionBlockSection']"):
+                header = section.query_selector("[class*='JobDescriptionBlockSection-headerText']")
+                if header and (header.inner_text() or "").strip() == "アクセス":
+                    first_li = section.query_selector("li")
+                    if first_li:
+                        li_text = (first_li.inner_text() or "").strip()
+                        m = re.search(r'「(\S+駅)」', li_text)
+                        if m:
+                            station = m.group(1)
+                    break
 
             # 写真URLを探す
             for sel in PHOTO_SELECTORS:
