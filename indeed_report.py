@@ -119,6 +119,9 @@ def normalize_job_role(core, rules=None):
 def extract_job_title(job_full, rules=None):
     """求人列からコア職種を抽出して正規化する"""
     stripped = re.sub(r'\s*[（(][^）)]*[）)]\s*$', '', job_full).strip()
+    # 「キャッチコピー/職種名」形式は / の後ろを使う
+    if '/' in stripped:
+        stripped = stripped.rsplit('/', 1)[1].strip()
     idx = stripped.rfind('の')
     core = stripped[idx + 1:].strip() if idx != -1 else stripped
     return normalize_job_role(core, rules)
