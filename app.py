@@ -808,8 +808,8 @@ with settings_tab:
             column_config={
                 "クライアント名":    st.column_config.TextColumn("クライアント名", width="small"),
                 "スプレッドシートID": st.column_config.TextColumn("スプレッドシートID", width="large"),
-                "シート名①":         st.column_config.TextColumn("シート名①（集計）", width="medium"),
-                "シート名②":         st.column_config.TextColumn("シート名②（詳細・省略可）", width="medium"),
+                "シート名①":         st.column_config.TextColumn("シート名①（店舗×雇用形態）", width="medium"),
+                "シート名②":         st.column_config.TextColumn("シート名②（店舗×職種×雇用形態・省略可）", width="medium"),
             },
         )
         st.caption("💡 設定はGoogleスプレッドシートに保存されるため、アプリを再起動しても消えません。")
