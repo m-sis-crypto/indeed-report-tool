@@ -218,22 +218,36 @@ def scrape_with_playwright(url: str) -> tuple:
                     header = section.query_selector("[class*='JobDescriptionBlockSection-headerText']")
                     if header and (header.inner_text() or "").strip() == target_header:
                         full = (section.inner_text() or "").strip()
+                        first_addr_line = None
                         for line in full.split("\n"):
                             line = line.strip()
-                            if any(line.startswith(pref) for pref in PREFECTURES):
+                            if not line or line in ("勤務地所在地", "勤務地"):
+                                continue
+                            # 郵便番号（〒XXX-XXXX）が先頭についている場合は除去
+                            line_normalized = re.sub(r'^〒\d{3}-\d{4}\s*', '', line)
+                            if any(line_normalized.startswith(pref) for pref in PREFECTURES):
                                 # 全角・半角スペース除去（例：「東京都 品川区 大井町駅」→「東京都品川区大井町駅」）
-                                area = line.replace(" ", "").replace("　", "")
+                                area = line_normalized.replace(" ", "").replace("　", "")
                                 break
+                            if first_addr_line is None:
+                                first_addr_line = line_normalized
+                        # フォールバック：都道府県で始まる行がなければ最初の非ヘッダー行を使う
+                        # （例：「仙台市宮城野区...」のように都道府県が省略されているケース）
+                        if not area and first_addr_line:
+                            area = first_addr_line.replace(" ", "").replace("　", "")
                         break
 
             # 最寄り駅：「アクセス」セクション内で徒歩最小の駅を選ぶ
             # 対応フォーマット：
             #   「大井町駅」徒歩5分 / 「大井町駅」北口から徒歩5分
             #   大井町駅より徒歩5分 / 大井町駅から徒歩5分 / 大井町駅 徒歩5分
+            # 駅名文字クラス：中黒(・)・読点・スペースで区切る（複数駅列挙への対応）
+            _ST = r'[^\s・、,]+'
             STATION_PATTERNS = [
-                r'「(\S+駅)」[^\n]*?徒歩(\d+)分',   # 「」ありパターン
-                r'(\S+駅)[よかまでりら]{1,4}[^\n]*?徒歩(\d+)分',  # 「」なし・より/から/まで
-                r'(\S+駅)\s+徒歩(\d+)分',            # スペース区切り
+                rf'「({_ST}駅)」[^\n]*?(?:直結|[Ss]ugu|すぐ|スグ|徒歩(?:約)?(\d+)分)',   # 「」ありパターン
+                rf'({_ST}駅)[よかまでりら]{{1,4}}[^\n]*?徒歩(?:約)?(\d+)分',              # より/から/まで
+                rf'({_ST}駅)\s+徒歩(?:約)?(\d+)分',                                       # スペース区切り
+                rf'({_ST}駅)[^\n]*?(?:直結|すぐ|スグ|徒歩(?:約)?(\d+)分)',                # 汎用（出口名・直結・すぐ・スグ含む）
             ]
             for section in page.query_selector_all("[class*='JobDescriptionBlockSection']"):
                 header = section.query_selector("[class*='JobDescriptionBlockSection-headerText']")
@@ -244,14 +258,23 @@ def scrape_with_playwright(url: str) -> tuple:
                         for pat in STATION_PATTERNS:
                             m = re.search(pat, li_text)
                             if m:
-                                candidates.append((int(m.group(2)), m.group(1)))
+                                walk = int(m.group(2)) if m.group(2) else 0  # 直結は0分扱い
+                                candidates.append((walk, m.group(1)))
                                 break  # 1つのliにつき最初にマッチしたパターンを使う
                     if candidates:
                         candidates.sort(key=lambda x: x[0])
                         raw_station = candidates[0][1]
-                        # 路線名が混入している場合は除去（例：「JR山手線巣鴨駅」→「巣鴨駅」）
-                        m_line = re.search(r'線(\S+駅)$', raw_station)
-                        station = m_line.group(1) if m_line else raw_station
+                        # 路線名が混入している場合は除去
+                        # 例：「JR山手線巣鴨駅」→「巣鴨駅」
+                        # 例：「JR川越線／川越駅」→「川越駅」（線／をまとめて除去）
+                        # 路線名除去①：「線」や「／」の後の駅名を抽出（例：JR山手線巣鴨駅→巣鴨駅）
+                        m_line = re.search(r'(?:線／?|／)(\S+駅)', raw_station)
+                        if m_line:
+                            station = m_line.group(1)
+                        else:
+                            # 路線名除去②：JR等の半角英字プレフィックスを除去（例：JR大阪駅→大阪駅）
+                            cleaned = re.sub(r'^[A-Za-z]+', '', raw_station)
+                            station = cleaned if cleaned.endswith('駅') else raw_station
                     break
 
             # 写真URLを探す
@@ -351,10 +374,10 @@ def main():
         url     = row[COL_URL]     if len(row) > COL_URL     else ""
         station = row[COL_STATION] if len(row) > COL_STATION else ""
         area    = row[COL_AREA]    if len(row) > COL_AREA    else ""
-        if url and url.startswith("http") and (not station or not area):
+        if url and url.startswith("http") and (not station or not area or station == "不明" or area == "不明"):
             targets.append((sheet_row, row))
 
-    print(f"  取得対象（キャッチコピー空 or エリア/最寄り駅空）: {len(targets)}件\n")
+    print(f"  取得対象（キャッチコピー空 or エリア/最寄り駅空 or 不明）: {len(targets)}件\n")
 
     if not targets:
         print("✅ 取得が必要な行はありません")
@@ -378,17 +401,22 @@ def main():
         # エリア・最寄り駅は自動取得で常に上書き（以前の手動入力値を正しい値に更新）
         photo_desc = describe_photo(photo_url) if photo_url else ""
 
+        # 取得できなかった場合、既存値がなければ「不明」をセット
+        # 既存値が「不明」でも新たに取得できた場合は実際の値に上書き
+        final_station = station if station else ("不明" if not existing_station or existing_station == "不明" else "")
+        final_area    = area    if area    else ("不明" if not existing_area    or existing_area    == "不明" else "")
+
         print(f"  キャッチコピー: {catchphrase[:60] if catchphrase else '（取得できず）'}")
         print(f"  写真説明: {photo_desc if photo_desc else '（取得できず）'}")
         print(f"  給与: {salary if salary else '（取得できず）'}")
-        print(f"  最寄り駅: {station if station else '（取得できず）'}")
-        print(f"  エリア: {area if area else '（取得できず）'}")
+        print(f"  最寄り駅: {final_station if final_station else '（取得できず）'}")
+        print(f"  エリア: {final_area if final_area else '（取得できず）'}")
 
-        if catchphrase or photo_desc or salary or station or area:
-            update_cells(service, sheet_row, catchphrase, photo_desc, salary, station, area)
+        if catchphrase or photo_desc or salary or final_station or final_area:
+            update_cells(service, sheet_row, catchphrase, photo_desc, salary, final_station, final_area)
             success_count += 1
-            if (station or area) and client and store:
-                master_updates[client][store] = {"station": station, "area": area}
+            if (final_station or final_area) and client and store:
+                master_updates[client][store] = {"station": final_station, "area": final_area}
             print("  → 倉庫に書き込みました ✅")
         else:
             print("  → スキップ（取得できなかったため書き込まず）")

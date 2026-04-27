@@ -6,9 +6,8 @@
 import re
 
 URLS = [
-    "http://jp.indeed.com/job/%E3%82%B7%E3%83%95%E3%83%88%E8%87%AA%E7%94%B1new%E3%83%A9%E3%83%BC%E3%83%A1%E3%83%B3%E5%BA%97%E3%81%AE%E5%BA%97%E8%88%97%E3%82%B9%E3%82%BF%E3%83%83%E3%83%95%E3%82%A2%E3%83%AB%E3%83%90%E3%82%A4%E3%83%88-0f405c2f2545ce7b",
-    "http://jp.indeed.com/job/%E3%82%B7%E3%83%95%E3%83%88%E8%87%AA%E7%94%B1%E3%81%8A%E6%B4%92%E8%90%BD%E3%81%AA%E3%82%A4%E3%82%BF%E3%83%AA%E3%82%A2%E3%83%B3%E3%83%90%E3%83%AB%E3%81%AE%E5%BA%97%E8%88%97%E9%81%8B%E5%96%B6%E3%82%B9%E3%82%BF%E3%83%83%E3%83%95%E3%82%A2%E3%83%AB%E3%83%90%E3%82%A4%E3%83%88-d36bca5822422125",
-    "http://jp.indeed.com/job/%E3%82%B7%E3%83%95%E3%83%88%E8%87%AA%E7%94%B1%E3%82%AB%E3%83%95%E3%82%A7%E3%83%90%E3%83%AB%E3%81%AE%E3%83%9B%E3%83%BC%E3%83%AB%E3%82%B9%E3%82%BF%E3%83%83%E3%83%95%E3%82%A2%E3%83%AB%E3%83%90%E3%82%A4%E3%83%88-2544a273a20f085e",
+    "http://jp.indeed.com/job/%E3%81%8A%E6%B4%92%E8%90%BD%E8%87%AA%E7%94%B1%E3%82%A4%E3%82%BF%E3%83%AA%E3%82%A2%E3%83%B3%E3%83%93%E3%82%B9%E3%83%88%E3%83%AD%E3%81%AE%E3%83%9B%E3%83%BC%E3%83%AB%E3%82%B9%E3%82%BF%E3%83%83%E3%83%95%E3%82%A2%E3%83%AB%E3%83%90%E3%82%A4%E3%83%88-43ea19ee215e5c88",
+    "http://jp.indeed.com/job/%E3%82%AA%E3%82%B7%E3%83%A3%E3%83%AC%E8%87%AA%E7%94%B1%E3%81%AA%E3%82%A4%E3%82%BF%E3%83%AA%E3%82%A2%E3%83%B3%E3%83%90%E3%83%AB%E3%81%AE%E3%83%9B%E3%83%BC%E3%83%AB%E3%82%B9%E3%82%BF%E3%83%83%E3%83%95%E3%82%A2%E3%83%AB%E3%83%90%E3%82%A4%E3%83%88-ef014c979c2f50e7",
 ]
 
 def test_url(page, url):
@@ -57,10 +56,12 @@ def test_url(page, url):
         print("  見つからず")
 
     # ④ 「アクセス」セクション：複数パターン正規表現でテスト
+    _ST = r'[^\s・、,]+'
     STATION_PATTERNS = [
-        (r'「(\S+駅)」[^\n]*?徒歩(\d+)分',            '「」ありパターン'),
-        (r'(\S+駅)[よかまでりら]{1,4}[^\n]*?徒歩(\d+)分', 'より/から/まで'),
-        (r'(\S+駅)\s+徒歩(\d+)分',                    'スペース区切り'),
+        (rf'「({_ST}駅)」[^\n]*?(?:直結|すぐ|スグ|徒歩(?:約)?(\d+)分)',   '「」ありパターン（直結・すぐ・スグ含む）'),
+        (rf'({_ST}駅)[よかまでりら]{{1,4}}[^\n]*?徒歩(?:約)?(\d+)分',     'より/から/まで'),
+        (rf'({_ST}駅)\s+徒歩(?:約)?(\d+)分',                              'スペース区切り'),
+        (rf'({_ST}駅)[^\n]*?(?:直結|すぐ|スグ|徒歩(?:約)?(\d+)分)',        '汎用（出口名・直結・すぐ・スグ含む）'),
     ]
     print("\n【④ 「アクセス」セクション（複数パターン正規表現）】")
     found = False
@@ -75,14 +76,19 @@ def test_url(page, url):
                 for pat, label in STATION_PATTERNS:
                     m = re.search(pat, li_text)
                     if m:
-                        candidates.append((int(m.group(2)), m.group(1)))
-                        print(f"    → [{label}] 駅={m.group(1)}, 徒歩={m.group(2)}分")
+                        walk = int(m.group(2)) if m.group(2) else 0
+                        candidates.append((walk, m.group(1)))
+                        print(f"    → [{label}] 駅={m.group(1)}, 徒歩={m.group(2) or '直結(0)'}分")
                         break
             if candidates:
                 candidates.sort(key=lambda x: x[0])
                 raw = candidates[0][1]
-                m_line = re.search(r'線(\S+駅)$', raw)
-                final = m_line.group(1) if m_line else raw
+                m_line = re.search(r'(?:線／?|／)(\S+駅)', raw)
+                if m_line:
+                    final = m_line.group(1)
+                else:
+                    cleaned = re.sub(r'^[A-Za-z]+', '', raw)
+                    final = cleaned if cleaned.endswith('駅') else raw
                 print(f"  ★ 選択: {final}（徒歩{candidates[0][0]}分）{'← 路線名除去: ' + raw if m_line else ''}")
             else:
                 print("  ★ マッチなし（駅取得できず）")

@@ -293,9 +293,9 @@ def clients_to_df(clients: dict) -> pd.DataFrame:
     return pd.DataFrame([
         {
             "クライアント名":    name,
-            "スプレッドシートID": cfg["spreadsheet_id"],
-            "シート名①":         cfg["sheet_pattern1"],
-            "シート名②":         cfg["sheet_pattern2"],
+            "スプレッドシートID": cfg.get("spreadsheet_id", ""),
+            "シート名①":         cfg.get("sheet_pattern1", ""),
+            "シート名②":         cfg.get("sheet_pattern2", ""),
         }
         for name, cfg in clients.items()
     ])
@@ -305,14 +305,17 @@ def df_to_clients(df: pd.DataFrame) -> dict:
     clients = {}
     for _, row in df.iterrows():
         name = str(row["クライアント名"]).strip()
-        if not name:
+        if not name or name.lower() in ("nan", "none"):
             continue
+        _NULLS = ("nan", "NaN", "None", "none", "-", "")
+        raw1 = str(row["シート名①"]).strip()
         raw2 = str(row["シート名②"]).strip()
+        rawid = str(row["スプレッドシートID"]).strip()
         clients[name] = {
             "master_path":    f"masters/{name.lower()}.csv",
-            "spreadsheet_id": str(row["スプレッドシートID"]).strip(),
-            "sheet_pattern1": str(row["シート名①"]).strip(),
-            "sheet_pattern2": "" if raw2 in ("nan", "NaN", "None", "-") else raw2,
+            "spreadsheet_id": "" if rawid in _NULLS else rawid,
+            "sheet_pattern1": "" if raw1 in _NULLS else raw1,
+            "sheet_pattern2": "" if raw2 in _NULLS else raw2,
         }
     return clients
 
