@@ -221,23 +221,37 @@ def scrape_with_playwright(url: str) -> tuple:
                         for line in full.split("\n"):
                             line = line.strip()
                             if any(line.startswith(pref) for pref in PREFECTURES):
-                                area = line
+                                # 全角・半角スペース除去（例：「東京都 品川区 大井町駅」→「東京都品川区大井町駅」）
+                                area = line.replace(" ", "").replace("　", "")
                                 break
                         break
 
-            # 最寄り駅：「アクセス」セクション内の「駅名」徒歩X分 で徒歩最小を選ぶ
+            # 最寄り駅：「アクセス」セクション内で徒歩最小の駅を選ぶ
+            # 対応フォーマット：
+            #   「大井町駅」徒歩5分 / 「大井町駅」北口から徒歩5分
+            #   大井町駅より徒歩5分 / 大井町駅から徒歩5分 / 大井町駅 徒歩5分
+            STATION_PATTERNS = [
+                r'「(\S+駅)」[^\n]*?徒歩(\d+)分',   # 「」ありパターン
+                r'(\S+駅)[よかまでりら]{1,4}[^\n]*?徒歩(\d+)分',  # 「」なし・より/から/まで
+                r'(\S+駅)\s+徒歩(\d+)分',            # スペース区切り
+            ]
             for section in page.query_selector_all("[class*='JobDescriptionBlockSection']"):
                 header = section.query_selector("[class*='JobDescriptionBlockSection-headerText']")
                 if header and (header.inner_text() or "").strip() == "アクセス":
                     candidates = []
                     for li in section.query_selector_all("li"):
                         li_text = (li.inner_text() or "").strip()
-                        m = re.search(r'「(\S+駅)」.*?徒歩(\d+)分', li_text)
-                        if m:
-                            candidates.append((int(m.group(2)), m.group(1)))
+                        for pat in STATION_PATTERNS:
+                            m = re.search(pat, li_text)
+                            if m:
+                                candidates.append((int(m.group(2)), m.group(1)))
+                                break  # 1つのliにつき最初にマッチしたパターンを使う
                     if candidates:
                         candidates.sort(key=lambda x: x[0])
-                        station = candidates[0][1]
+                        raw_station = candidates[0][1]
+                        # 路線名が混入している場合は除去（例：「JR山手線巣鴨駅」→「巣鴨駅」）
+                        m_line = re.search(r'線(\S+駅)$', raw_station)
+                        station = m_line.group(1) if m_line else raw_station
                     break
 
             # 写真URLを探す
