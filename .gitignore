@@ -4,3 +4,7 @@ token.json
 .env
 *.bat
 CLAUDE.md
+*.log
+debug_*.html
+debug_*.py
+fetch_run_now*.log

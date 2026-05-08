@@ -627,6 +627,48 @@ def batch_scrape(rows_raw: list) -> dict:
 # ============================================================
 # Sheets ヘルパー（レポート書き込み用）
 # ============================================================
+def ensure_report_sheet(service, spreadsheet_id: str, sheet_name: str) -> dict:
+    """レポートシートが無ければ作成し、ヘッダー行が空なら COLS を書き込む。
+
+    Returns: {"created": bool, "header_added": bool}
+    """
+    spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    existing_titles = {s["properties"]["title"] for s in spreadsheet["sheets"]}
+
+    created = False
+    if sheet_name not in existing_titles:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]},
+        ).execute()
+        created = True
+
+    header_added = False
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A1:K1",
+        ).execute()
+        first_row = result.get("values", [])
+        is_empty = (
+            not first_row
+            or not first_row[0]
+            or not any(str(c).strip() for c in first_row[0])
+        )
+        if is_empty:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{sheet_name}'!A1",
+                valueInputOption="RAW",
+                body={"values": [COLS]},
+            ).execute()
+            header_added = True
+    except Exception:
+        pass
+
+    return {"created": created, "header_added": header_added}
+
+
 def get_last_row(service, spreadsheet_id, sheet_name):
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
@@ -1182,6 +1224,11 @@ with main_tab:
                 service = get_service()
 
                 if sheet_rows1:
+                    ensured1 = ensure_report_sheet(service, config["spreadsheet_id"], config["sheet_pattern1"])
+                    if ensured1["created"]:
+                        st.info(f"📋 シート「{config['sheet_pattern1']}」を新規作成しました")
+                    if ensured1["header_added"]:
+                        st.info(f"📋 シート「{config['sheet_pattern1']}」にヘッダー行を書き込みました")
                     deleted1 = delete_period_rows(service, config["spreadsheet_id"], config["sheet_pattern1"], period_start, period_end)
                     last1 = get_last_row(service, config["spreadsheet_id"], config["sheet_pattern1"])
                     append_to_sheet(service, config["spreadsheet_id"], config["sheet_pattern1"], sheet_rows1, last1 + 1)
@@ -1192,6 +1239,11 @@ with main_tab:
 
                 sheet2 = config.get("sheet_pattern2", "")
                 if sheet2 and sheet_rows2:
+                    ensured2 = ensure_report_sheet(service, config["spreadsheet_id"], sheet2)
+                    if ensured2["created"]:
+                        st.info(f"📋 シート「{sheet2}」を新規作成しました")
+                    if ensured2["header_added"]:
+                        st.info(f"📋 シート「{sheet2}」にヘッダー行を書き込みました")
                     deleted2 = delete_period_rows(service, config["spreadsheet_id"], sheet2, period_start, period_end)
                     last2 = get_last_row(service, config["spreadsheet_id"], sheet2)
                     append_to_sheet(service, config["spreadsheet_id"], sheet2, sheet_rows2, last2 + 1)
@@ -1207,6 +1259,7 @@ with main_tab:
                     if sheet2:
                         target_sheets.append(sheet2)
                     for sname in target_sheets:
+                        ensure_report_sheet(service, config["spreadsheet_id"], sname)
                         last = get_last_row(service, config["spreadsheet_id"], sname)
                         append_to_sheet(service, config["spreadsheet_id"], sname, unknown_rows, last + 1)
                     label = "①②両シート" if sheet2 else "シート①"
